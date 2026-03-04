@@ -24,6 +24,7 @@ import desloppify.app.commands.scan.cmd as scan_cmd_mod
 import desloppify.app.commands.scan.reporting.presentation as scan_reporting_presentation
 import desloppify.app.commands.scan.reporting.subjective as scan_reporting_subjective
 import desloppify.app.commands.scan.workflow as scan_workflow
+import desloppify.app.commands.status.cmd as status_cmd_mod
 import desloppify.app.commands.status.render as status_render
 import desloppify.app.commands.status.summary as status_summary
 import desloppify.app.output._viz_cmd_context as viz_cmd_context
@@ -127,6 +128,7 @@ def test_smoke_commands():
         review_prepare.do_prepare,
         review_runner_helpers.run_codex_batch,
         review_runtime_setup.setup_lang,
+        status_cmd_mod.cmd_status,
         status_render.show_tier_progress_table,
         status_summary.score_summary_lines,
         scan_reporting_presentation.show_score_model_breakdown,

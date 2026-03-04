@@ -14,7 +14,7 @@ from ._runner_process_attempts import (
     _resolve_retry_config,
     _run_batch_attempt,
 )
-from ._runner_process_io import _extract_payload_from_log
+from ._runner_process_io import _extract_payload_from_log  # noqa: F401 (runner_parallel import)
 from ._runner_process_types import (
     CodexBatchRunnerDeps,
     FollowupScanDeps,

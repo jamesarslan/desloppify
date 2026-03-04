@@ -55,27 +55,38 @@ def _print_score_recipe(
     mech_avg: float,
     subj_avg: float | None,
 ) -> None:
+    recipe_lines = _score_recipe_lines(
+        mech_frac=mech_frac,
+        subj_frac=subj_frac,
+        mech_avg=mech_avg,
+        subj_avg=subj_avg,
+    )
     print(colorize_fn("  Score recipe:", "dim"))
+    for recipe_line in recipe_lines:
+        print(colorize_fn(f"    {recipe_line}", "dim"))
+
+
+def _score_recipe_lines(
+    *,
+    mech_frac: float,
+    subj_frac: float,
+    mech_avg: float,
+    subj_avg: float | None,
+) -> list[str]:
     if subj_avg is None or subj_frac <= 0.0:
-        print(colorize_fn("    overall = 100% mechanical", "dim"))
-        print(colorize_fn(f"    Mechanical pool average: {mech_avg:.1f}%", "dim"))
-        return
+        return [
+            "overall = 100% mechanical",
+            f"Mechanical pool average: {mech_avg:.1f}%",
+        ]
     if mech_frac <= 0.0:
-        print(colorize_fn("    overall = 100% subjective", "dim"))
-        print(colorize_fn(f"    Subjective pool average: {subj_avg:.1f}%", "dim"))
-        return
-    print(
-        colorize_fn(
-            f"    overall = {mech_frac * 100:.0f}% mechanical + {subj_frac * 100:.0f}% subjective",
-            "dim",
-        )
-    )
-    print(
-        colorize_fn(
-            f"    Pool averages: mechanical {mech_avg:.1f}% · subjective {subj_avg:.1f}%",
-            "dim",
-        )
-    )
+        return [
+            "overall = 100% subjective",
+            f"Subjective pool average: {subj_avg:.1f}%",
+        ]
+    return [
+        f"overall = {mech_frac * 100:.0f}% mechanical + {subj_frac * 100:.0f}% subjective",
+        f"Pool averages: mechanical {mech_avg:.1f}% · subjective {subj_avg:.1f}%",
+    ]
 
 
 def _sorted_weighted_drags(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
