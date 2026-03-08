@@ -207,6 +207,7 @@ def _cmd_stage_reflect(
         stages=stages,
         attestation=attestation,
         triage_input=si,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
@@ -313,12 +314,19 @@ def _cmd_stage_organize(
     if not _require_reflect_stage_for_organize(stages):
         return
 
+    runtime = resolved_services.command_runtime(args)
+    state = runtime.state
+    triage_input = resolved_services.collect_triage_input(plan, state)
+
     # Fold-confirm: auto-confirm reflect if attestation provided
     if not _auto_confirm_reflect_for_organize(
         args=args,
         plan=plan,
         stages=stages,
         attestation=attestation,
+        triage_input=triage_input,
+        detect_recurring_patterns_fn=resolved_services.detect_recurring_patterns,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
@@ -332,7 +340,6 @@ def _cmd_stage_organize(
         return
 
     # Validate: all review issues are in a manual cluster (or wontfixed)
-    state = resolved_services.command_runtime(args).state
     if not _unclustered_review_issues_or_error(plan, state):
         return
 
@@ -426,7 +433,10 @@ def _cmd_stage_enrich(
         if attestation:
             from ._stage_validation import _auto_confirm_organize_for_complete
             if not _auto_confirm_organize_for_complete(
-                plan=plan, stages=stages, attestation=attestation,
+                plan=plan,
+                stages=stages,
+                attestation=attestation,
+                save_plan_fn=resolved_services.save_plan,
             ):
                 return
         else:

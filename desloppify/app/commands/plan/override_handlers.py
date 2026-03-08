@@ -30,7 +30,6 @@ from desloppify.base.output.terminal import colorize
 from desloppify.base.output.user_message import print_user_message
 from desloppify.engine._work_queue.core import ATTEST_EXAMPLE
 from desloppify.engine.plan import (
-    PLAN_FILE,
     TRIAGE_IDS,
     TRIAGE_STAGE_IDS,
     SKIP_KIND_LABELS,
@@ -41,6 +40,7 @@ from desloppify.engine.plan import (
     append_log_entry,
     clear_focus,
     describe_issue,
+    get_plan_file,
     load_plan,
     plan_path_for_state,
     purge_ids,
@@ -61,11 +61,11 @@ _BULK_SKIP_THRESHOLD = 5
 
 
 def _resolve_state_file(path: Path | None) -> Path:
-    return path if path is not None else state_mod.STATE_FILE
+    return path if path is not None else state_mod.get_state_file()
 
 
 def _resolve_plan_file(path: Path | None) -> Path:
-    return path if path is not None else PLAN_FILE
+    return path if path is not None else get_plan_file()
 
 
 def _plan_file_for_state(state_file: Path | None) -> Path | None:

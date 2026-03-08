@@ -97,6 +97,7 @@ from desloppify.engine._plan.step_parser import (
 # --- persistence ------------------------------------------------------------
 from desloppify.engine._plan.persistence import (
     PLAN_FILE,
+    get_plan_file,
     has_living_plan,
     load_plan,
     plan_lock,
@@ -132,36 +133,44 @@ from desloppify.engine._plan.schema import (
     validate_plan,
 )
 
-# --- stale dimensions -------------------------------------------------------
-from desloppify.engine._plan.stale_dimensions import (
+# --- constants --------------------------------------------------------------
+from desloppify.engine._plan.constants import (
     SYNTHETIC_PREFIXES,
     TRIAGE_ID,
     TRIAGE_IDS,
     TRIAGE_PREFIX,
     TRIAGE_STAGE_IDS,
     WORKFLOW_CREATE_PLAN_ID,
-    WORKFLOW_SCORE_CHECKPOINT_ID,
     WORKFLOW_PREFIX,
-    CommunicateScoreSyncResult,
-    ImportScoresSyncResult,
-    StaleDimensionSyncResult,
-    TriageSyncResult,
-    UnscoredDimensionSyncResult,
-    compute_new_issue_ids,
+    WORKFLOW_SCORE_CHECKPOINT_ID,
+    QueueSyncResult,
+)
+
+# --- sync: dimensions ------------------------------------------------------
+from desloppify.engine._plan.sync_dimensions import (
     current_unscored_ids,
-    is_triage_stale,
-    review_issue_snapshot_hash,
-    sync_communicate_score_needed,
-    sync_import_scores_needed,
-    sync_create_plan_needed,
-    sync_score_checkpoint_needed,
     sync_stale_dimensions,
-    sync_triage_needed,
     sync_unscored_dimensions,
+)
+
+# --- sync: triage -----------------------------------------------------------
+from desloppify.engine._plan.sync_triage import (
+    compute_new_issue_ids,
+    is_triage_stale,
+    sync_triage_needed,
+)
+
+# --- sync: workflow ---------------------------------------------------------
+from desloppify.engine._plan.sync_workflow import (
+    sync_communicate_score_needed,
+    sync_create_plan_needed,
+    sync_import_scores_needed,
+    sync_score_checkpoint_needed,
 )
 from desloppify.engine._plan.stale_policy import (
     _REVIEW_DETECTORS,
     open_review_ids,
+    review_issue_snapshot_hash,
 )
 
 # --- subjective policy ------------------------------------------------------
@@ -211,6 +220,7 @@ __all__ = [
     "validate_plan",
     # persistence
     "PLAN_FILE",
+    "get_plan_file",
     "has_living_plan",
     "load_plan",
     "plan_lock",
@@ -263,7 +273,7 @@ __all__ = [
     # auto-clustering
     "AUTO_PREFIX",
     "auto_cluster_issues",
-    # stale dimensions
+    # constants + sync
     "TRIAGE_ID",
     "TRIAGE_IDS",
     "TRIAGE_PREFIX",
@@ -272,23 +282,19 @@ __all__ = [
     "WORKFLOW_CREATE_PLAN_ID",
     "WORKFLOW_SCORE_CHECKPOINT_ID",
     "WORKFLOW_PREFIX",
-    "CommunicateScoreSyncResult",
-    "ImportScoresSyncResult",
-    "StaleDimensionSyncResult",
-    "TriageSyncResult",
-    "UnscoredDimensionSyncResult",
+    "QueueSyncResult",
     "compute_new_issue_ids",
     "current_unscored_ids",
     "is_triage_stale",
-    "review_issue_snapshot_hash",
     "sync_communicate_score_needed",
-    "sync_import_scores_needed",
     "sync_create_plan_needed",
+    "sync_import_scores_needed",
     "sync_score_checkpoint_needed",
     "sync_stale_dimensions",
     "sync_triage_needed",
     "sync_unscored_dimensions",
     "open_review_ids",
+    "review_issue_snapshot_hash",
     "_REVIEW_DETECTORS",
     # epic triage
     "TriageInput",

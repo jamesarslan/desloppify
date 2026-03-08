@@ -22,14 +22,27 @@ from desloppify.engine._state.schema import (
     StateModel,
     empty_state,
     ensure_state_defaults,
+    get_state_file,
     json_default,
     validate_state_invariants,
 )
 
 logger = logging.getLogger(__name__)
 
+_INITIAL_STATE_FILE = STATE_FILE
+
 
 from desloppify.engine._state import _recompute_stats
+
+
+def _default_state_file() -> Path:
+    """Resolve the default state path, honoring runtime context overrides.
+
+    If tests monkeypatch ``STATE_FILE`` in this module, use that override.
+    """
+    if STATE_FILE != _INITIAL_STATE_FILE:
+        return Path(STATE_FILE)
+    return get_state_file()
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -50,7 +63,7 @@ def _normalize_loaded_state(data: object) -> dict[str, object]:
 
 def load_state(path: Path | None = None) -> StateModel:
     """Load state from disk, or return empty state on missing/corruption."""
-    state_path = path or STATE_FILE
+    state_path = path or _default_state_file()
     if not state_path.exists():
         return empty_state()
 
@@ -176,7 +189,7 @@ def save_state(
     )
     validate_state_invariants(state)
 
-    state_path = path or STATE_FILE
+    state_path = path or _default_state_file()
     state_path.parent.mkdir(parents=True, exist_ok=True)
 
     content = json.dumps(state, indent=2, default=json_default) + "\n"

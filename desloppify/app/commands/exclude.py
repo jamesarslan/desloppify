@@ -29,7 +29,7 @@ def _state_file_for_runtime(runtime) -> Path:
     state_file = runtime.state_path
     if isinstance(state_file, Path):
         return state_file
-    return state_mod.STATE_FILE
+    return state_mod.get_state_file()
 
 
 def _prune_excluded_issues(state: dict, pattern: str) -> list[str]:

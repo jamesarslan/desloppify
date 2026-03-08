@@ -6,7 +6,6 @@ import argparse
 import re
 from pathlib import Path
 
-from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.plan.triage_playbook import TRIAGE_CMD_ORGANIZE
 from desloppify.base.output.terminal import colorize
 from desloppify.engine.plan import (
@@ -40,6 +39,7 @@ def _auto_confirm_stage(
     inline_hint: str,
     dimensions: list[str] | None = None,
     cluster_names: list[str] | None = None,
+    save_plan_fn=save_plan,
 ) -> bool:
     """Shared auto-confirm flow for stage fold-confirm operations."""
     if stage_record.get("confirmed_at"):
@@ -63,7 +63,7 @@ def _auto_confirm_stage(
 
     stage_record["confirmed_at"] = utc_now()
     stage_record["confirmed_text"] = confirmed_text
-    save_plan(plan)
+    save_plan_fn(plan)
     print(colorize(f"  ✓ {stage_label} auto-confirmed via --attestation.", "green"))
     return True
 
@@ -74,6 +74,7 @@ def _auto_confirm_observe_if_attested(
     stages: dict,
     attestation: str | None,
     triage_input,
+    save_plan_fn=save_plan,
 ) -> bool:
     observe_stage = stages.get("observe")
     if observe_stage is None:
@@ -89,6 +90,7 @@ def _auto_confirm_observe_if_attested(
         confirm_cmd="desloppify plan triage --confirm observe",
         inline_hint="Or pass --attestation to auto-confirm observe inline.",
         dimensions=dim_names,
+        save_plan_fn=save_plan_fn,
     )
 
 
@@ -141,18 +143,29 @@ def _auto_confirm_reflect_for_organize(
     plan: dict,
     stages: dict,
     attestation: str | None,
+    triage_input=None,
+    command_runtime_fn=None,
+    collect_triage_input_fn=collect_triage_input,
+    detect_recurring_patterns_fn=detect_recurring_patterns,
+    save_plan_fn=save_plan,
 ) -> bool:
     reflect_stage = stages.get("reflect")
     if reflect_stage is None:
         return False
 
-    runtime = command_runtime(args)
-    triage_input = collect_triage_input(plan, runtime.state)
-    recurring = detect_recurring_patterns(
-        triage_input.open_issues,
-        triage_input.resolved_issues,
+    resolved_triage_input = triage_input
+    if resolved_triage_input is None:
+        runtime_factory = command_runtime_fn
+        if runtime_factory is None:
+            from desloppify.app.commands.helpers.runtime import command_runtime as runtime_factory
+        runtime = runtime_factory(args)
+        resolved_triage_input = collect_triage_input_fn(plan, runtime.state)
+
+    recurring = detect_recurring_patterns_fn(
+        resolved_triage_input.open_issues,
+        resolved_triage_input.resolved_issues,
     )
-    _by_dim, observe_dims = observe_dimension_breakdown(triage_input)
+    _by_dim, observe_dims = observe_dimension_breakdown(resolved_triage_input)
     reflect_dims = sorted(set((list(recurring.keys()) if recurring else []) + observe_dims))
     reflect_clusters = [
         name for name in plan.get("clusters", {}) if not plan["clusters"][name].get("auto")
@@ -168,6 +181,7 @@ def _auto_confirm_reflect_for_organize(
         inline_hint="Or pass --attestation to auto-confirm reflect inline.",
         dimensions=reflect_dims,
         cluster_names=reflect_clusters,
+        save_plan_fn=save_plan_fn,
     )
 
 
@@ -523,6 +537,7 @@ def _auto_confirm_enrich_for_complete(
     plan: dict,
     stages: dict,
     attestation: str | None,
+    save_plan_fn=save_plan,
 ) -> bool:
     enrich_stage = stages.get("enrich")
     if enrich_stage is None:
@@ -551,6 +566,7 @@ def _auto_confirm_enrich_for_complete(
         confirm_cmd="desloppify plan triage --confirm enrich",
         inline_hint="Or pass --attestation to auto-confirm enrich inline.",
         cluster_names=cluster_names,
+        save_plan_fn=save_plan_fn,
     )
 
 
@@ -575,6 +591,7 @@ def _auto_confirm_sense_check_for_complete(
     plan: dict,
     stages: dict,
     attestation: str | None,
+    save_plan_fn=save_plan,
 ) -> bool:
     sense_check_stage = stages.get("sense-check")
     if sense_check_stage is None:
@@ -593,6 +610,7 @@ def _auto_confirm_sense_check_for_complete(
         confirm_cmd="desloppify plan triage --confirm sense-check",
         inline_hint="Or pass --attestation to auto-confirm sense-check inline.",
         cluster_names=cluster_names,
+        save_plan_fn=save_plan_fn,
     )
 
 
@@ -645,6 +663,7 @@ def _auto_confirm_organize_for_complete(
     plan: dict,
     stages: dict,
     attestation: str | None,
+    save_plan_fn=save_plan,
 ) -> bool:
     organize_stage = stages.get("organize")
     if organize_stage is None:
@@ -663,6 +682,7 @@ def _auto_confirm_organize_for_complete(
         confirm_cmd="desloppify plan triage --confirm organize",
         inline_hint="Or pass --attestation to auto-confirm organize inline.",
         cluster_names=organize_clusters,
+        save_plan_fn=save_plan_fn,
     )
 
 

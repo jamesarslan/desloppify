@@ -74,6 +74,34 @@ def test_load_state_missing_and_backup_fallback(tmp_path):
     assert recovered["strict_score"] == 0
 
 
+def test_state_persistence_defaults_follow_runtime_project_root(tmp_path):
+    from desloppify.base.runtime_state import RuntimeContext, runtime_scope
+
+    state = schema_mod.empty_state()
+    ctx = RuntimeContext(project_root=tmp_path)
+    with runtime_scope(ctx):
+        persistence_mod.save_state(state)
+        loaded = persistence_mod.load_state()
+
+    expected = tmp_path / ".desloppify" / "state.json"
+    assert expected.exists()
+    assert loaded["version"] == schema_mod.CURRENT_VERSION
+    assert loaded["issues"] == {}
+
+
+def test_state_persistence_honors_monkeypatched_state_file(monkeypatch, tmp_path):
+    custom_state_file = tmp_path / "custom" / "state.json"
+    monkeypatch.setattr(persistence_mod, "STATE_FILE", custom_state_file)
+
+    state = schema_mod.empty_state()
+    persistence_mod.save_state(state)
+    loaded = persistence_mod.load_state()
+
+    assert custom_state_file.exists()
+    assert loaded["version"] == schema_mod.CURRENT_VERSION
+    assert loaded["issues"] == {}
+
+
 def test_match_and_resolve_issues_updates_state():
     state = schema_mod.empty_state()
     open_issue = filtering_mod.make_issue(

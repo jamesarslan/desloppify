@@ -71,6 +71,7 @@ def _cmd_triage_complete(
         plan=plan,
         stages=stages,
         attestation=attestation,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
@@ -87,6 +88,7 @@ def _cmd_triage_complete(
         plan=plan,
         stages=stages,
         attestation=attestation,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
@@ -103,6 +105,7 @@ def _cmd_triage_complete(
         plan=plan,
         stages=stages,
         attestation=attestation,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 

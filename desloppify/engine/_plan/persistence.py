@@ -22,17 +22,38 @@ from desloppify.engine._plan.schema import (
     ensure_plan_defaults,
     validate_plan,
 )
-from desloppify.engine._state.schema import STATE_DIR, json_default, utc_now
+from desloppify.engine._state.schema import (
+    STATE_DIR,
+    get_state_dir,
+    json_default,
+    utc_now,
+)
 
 logger = logging.getLogger(__name__)
 
 PLAN_FILE = STATE_DIR / "plan.json"
+_INITIAL_PLAN_FILE = PLAN_FILE
+
+
+def get_plan_file() -> Path:
+    """Return the default plan file for the current runtime context."""
+    return get_state_dir() / "plan.json"
+
+
+def _default_plan_file() -> Path:
+    """Resolve the effective default plan path.
+
+    If tests monkeypatch ``PLAN_FILE`` in this module, use the patched value.
+    """
+    if PLAN_FILE != _INITIAL_PLAN_FILE:
+        return Path(PLAN_FILE)
+    return get_plan_file()
 
 
 @contextmanager
 def plan_lock(path: Path | None = None) -> Iterator[None]:
     """Acquire exclusive lock on plan file for read-modify-write safety."""
-    plan_path = path or PLAN_FILE
+    plan_path = path or _default_plan_file()
     lock_path = plan_path.with_suffix(".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY)
@@ -46,7 +67,7 @@ def plan_lock(path: Path | None = None) -> Iterator[None]:
 
 def load_plan(path: Path | None = None) -> PlanModel:
     """Load plan from disk, or return empty plan on missing/corruption."""
-    plan_path = path or PLAN_FILE
+    plan_path = path or _default_plan_file()
     if not plan_path.exists():
         return empty_plan()
 
@@ -101,7 +122,7 @@ def save_plan(plan: PlanModel | dict, path: Path | None = None) -> None:
     plan["updated"] = utc_now()
     validate_plan(plan)
 
-    plan_path = path or PLAN_FILE
+    plan_path = path or _default_plan_file()
     plan_path.parent.mkdir(parents=True, exist_ok=True)
 
     content = json.dumps(plan, indent=2, default=json_default) + "\n"
@@ -127,7 +148,7 @@ def plan_path_for_state(state_path: Path) -> Path:
 
 def has_living_plan(path: Path | None = None) -> bool:
     """Return True if a plan.json exists and has user intent."""
-    plan_path = path or PLAN_FILE
+    plan_path = path or _default_plan_file()
     if not plan_path.exists():
         return False
     plan = load_plan(plan_path)
@@ -140,6 +161,7 @@ def has_living_plan(path: Path | None = None) -> bool:
 
 __all__ = [
     "PLAN_FILE",
+    "get_plan_file",
     "has_living_plan",
     "load_plan",
     "plan_lock",
