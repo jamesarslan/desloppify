@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 from desloppify import state as state_mod
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.base import config as config_mod
-from desloppify.base.exception_sets import PLAN_LOAD_EXCEPTIONS, CommandError
 from desloppify.base.discovery.file_paths import matches_exclusion
+from desloppify.base.exception_sets import PLAN_LOAD_EXCEPTIONS, CommandError
 from desloppify.base.output.terminal import colorize
 from desloppify.base.tooling import check_config_staleness
 from desloppify.engine.plan import (
@@ -20,13 +21,15 @@ from desloppify.engine.plan import (
     save_plan,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _state_file_for_runtime(runtime) -> Path:
     """Resolve the effective state file path for a command runtime."""
     state_file = runtime.state_path
     if isinstance(state_file, Path):
         return state_file
-    return state_mod.STATE_FILE
+    return state_mod.get_state_file()
 
 
 def _prune_excluded_issues(state: dict, pattern: str) -> list[str]:
@@ -84,7 +87,8 @@ def cmd_exclude(args: argparse.Namespace) -> None:
 
             try:
                 plan_purged = _purge_removed_ids_from_plan(state_file, removed_ids)
-            except PLAN_LOAD_EXCEPTIONS:
+            except PLAN_LOAD_EXCEPTIONS as exc:
+                logger.debug("Exclude command could not update living plan.", exc_info=exc)
                 print(
                     colorize("  Warning: could not update living plan.", "yellow"),
                     file=sys.stderr,

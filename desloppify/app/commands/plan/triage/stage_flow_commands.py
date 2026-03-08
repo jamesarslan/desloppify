@@ -11,14 +11,16 @@ from desloppify.state import utc_now
 from .display import print_organize_result, print_reflect_result
 from .helpers import (
     cascade_clear_later_confirmations,
+    count_log_activity_since,
     has_triage_in_queue,
     inject_triage_stages,
     print_cascade_clear_feedback,
 )
 from ._stage_records import (
-    _record_observe_stage,
-    _record_organize_stage,
-    _resolve_reusable_report,
+    record_enrich_stage,
+    record_observe_stage,
+    record_organize_stage,
+    resolve_reusable_report,
 )
 from ._stage_rendering import (
     _print_observe_report_requirement,
@@ -28,12 +30,25 @@ from ._stage_validation import (
     _auto_confirm_observe_if_attested,
     _auto_confirm_reflect_for_organize,
     _clusters_enriched_or_error,
+    _enrich_report_or_error,
     _manual_clusters_or_error,
     _organize_report_or_error,
+    _require_organize_stage_for_enrich,
     _require_reflect_stage_for_organize,
+    _steps_missing_issue_refs,
+    _steps_with_bad_paths,
+    _steps_with_vague_detail,
+    _steps_without_effort,
+    _underspecified_steps,
+    _unclustered_review_issues_or_error,
     _validate_recurring_dimension_mentions,
 )
 from .services import TriageServices, default_triage_services
+from .stage_flow_enrich_sense import (
+    record_sense_check_stage as _record_sense_check_stage_impl,
+    run_stage_enrich,
+    run_stage_sense_check,
+)
 
 
 def _cmd_stage_observe(
@@ -54,19 +69,21 @@ def _cmd_stage_observe(
     plan = resolved_services.load_plan()
 
     # Auto-start: inject triage stage IDs if not present
+    # NOTE: preserve existing stage data — don't clear triage_stages.
+    # Only _cmd_triage_start (explicit --start) should clear stages.
     if not has_triage_in_queue(plan):
         inject_triage_stages(plan)
         meta = plan.setdefault("epic_triage_meta", {})
-        meta["triage_stages"] = {}
+        meta.setdefault("triage_stages", {})
         resolved_services.save_plan(plan)
-        print(colorize("  Planning mode auto-started (4 stages queued).", "cyan"))
+        print(colorize("  Planning mode auto-started (6 stages queued).", "cyan"))
 
     meta = plan.setdefault("epic_triage_meta", {})
     stages = meta.setdefault("triage_stages", {})
     existing_stage = stages.get("observe")
 
     # Jump-back: reuse existing report if no --report provided
-    report, is_reuse = _resolve_reusable_report(report, existing_stage)
+    report, is_reuse = resolve_reusable_report(report, existing_stage)
     if not report:
         _print_observe_report_requirement()
         return
@@ -76,7 +93,7 @@ def _cmd_stage_observe(
 
     # Edge case: 0 issues
     if issue_count == 0:
-        cleared = _record_observe_stage(
+        cleared = record_observe_stage(
             stages,
             report=report,
             issue_count=0,
@@ -103,7 +120,7 @@ def _cmd_stage_observe(
     valid_ids = set(si.open_issues.keys())
     cited = resolved_services.extract_issue_citations(report, valid_ids)
 
-    cleared = _record_observe_stage(
+    cleared = record_observe_stage(
         stages,
         report=report,
         issue_count=issue_count,
@@ -138,13 +155,12 @@ def _cmd_stage_observe(
 
     if not is_reuse:
         print_user_message(
-            "Hey — observe is recorded. Before you confirm, make"
-            " sure you really explored the codebase — deploy"
-            " sub-agents if needed, find the root causes, understand"
-            " how issues relate to each other. Don't just skim."
-            " Once you're confident in your analysis, confirm and"
-            " continue to reflect. No need to stop for my input"
-            " unless I've asked you to."
+            "Observe recorded. Before confirming — did the subagent"
+            " verify every issue with code reads? Check: are there"
+            " specific file/line citations in the report, or just"
+            " restated issue titles? Each issue needs a verdict:"
+            " genuine / false positive / exaggerated. Don't confirm"
+            " until the analysis is backed by actual code evidence."
         )
 
 
@@ -198,6 +214,7 @@ def _cmd_stage_reflect(
         stages=stages,
         attestation=attestation,
         triage_input=si,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
@@ -304,12 +321,19 @@ def _cmd_stage_organize(
     if not _require_reflect_stage_for_organize(stages):
         return
 
+    runtime = resolved_services.command_runtime(args)
+    state = runtime.state
+    triage_input = resolved_services.collect_triage_input(plan, state)
+
     # Fold-confirm: auto-confirm reflect if attestation provided
     if not _auto_confirm_reflect_for_organize(
         args=args,
         plan=plan,
         stages=stages,
         attestation=attestation,
+        triage_input=triage_input,
+        detect_recurring_patterns_fn=resolved_services.detect_recurring_patterns,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
@@ -322,12 +346,34 @@ def _cmd_stage_organize(
     if not _clusters_enriched_or_error(plan):
         return
 
+    # Validate: all review issues are in a manual cluster (or wontfixed)
+    if not _unclustered_review_issues_or_error(plan, state):
+        return
+
+    # Warn if few/no cluster operations since reflect
+    reflect_ts = stages.get("reflect", {}).get("timestamp", "")
+    if reflect_ts and not is_reuse:
+        activity = count_log_activity_since(plan, reflect_ts)
+        cluster_ops = sum(
+            activity.get(k, 0)
+            for k in ("cluster_create", "cluster_add", "cluster_update", "cluster_remove")
+        )
+        if cluster_ops == 0:
+            print(colorize("  Warning: no cluster operations logged since reflect.", "yellow"))
+            print(colorize("  Did you create clusters, add issues, and enrich them?", "yellow"))
+            print(colorize("  The organize stage should reflect real work — not just recording a report.", "dim"))
+            print()
+        elif cluster_ops < 3:
+            print(colorize(f"  Note: only {cluster_ops} cluster operation(s) logged since reflect.", "yellow"))
+            print(colorize("  Make sure all clusters are properly set up before proceeding.", "dim"))
+            print()
+
     report = _organize_report_or_error(report)
     if report is None:
         return
 
     stages = meta.setdefault("triage_stages", {})
-    cleared = _record_organize_stage(
+    cleared = record_organize_stage(
         stages,
         report=report,
         issue_count=len(manual_clusters),
@@ -355,6 +401,68 @@ def _cmd_stage_organize(
     )
 
 
+def _cmd_stage_enrich(
+    args: argparse.Namespace,
+    *,
+    services: TriageServices | None = None,
+) -> None:
+    """Public wrapper for enrich stage with patchable module dependencies."""
+    run_stage_enrich(
+        args,
+        services=services,
+        has_triage_in_queue_fn=has_triage_in_queue,
+        require_organize_stage_for_enrich_fn=_require_organize_stage_for_enrich,
+        underspecified_steps_fn=_underspecified_steps,
+        steps_with_bad_paths_fn=_steps_with_bad_paths,
+        steps_without_effort_fn=_steps_without_effort,
+        enrich_report_or_error_fn=_enrich_report_or_error,
+        resolve_reusable_report_fn=resolve_reusable_report,
+        record_enrich_stage_fn=record_enrich_stage,
+        colorize_fn=colorize,
+        print_user_message_fn=print_user_message,
+        print_cascade_clear_feedback_fn=print_cascade_clear_feedback,
+    )
+
+
+def _record_sense_check_stage(
+    stages: dict,
+    *,
+    report: str,
+    existing_stage: dict | None,
+    is_reuse: bool,
+) -> list[str]:
+    return _record_sense_check_stage_impl(
+        stages,
+        report=report,
+        existing_stage=existing_stage,
+        is_reuse=is_reuse,
+        utc_now_fn=utc_now,
+        cascade_clear_later_confirmations_fn=cascade_clear_later_confirmations,
+    )
+
+
+def _cmd_stage_sense_check(
+    args: argparse.Namespace,
+    *,
+    services: TriageServices | None = None,
+) -> None:
+    """Public wrapper for sense-check stage with patchable module dependencies."""
+    run_stage_sense_check(
+        args,
+        services=services,
+        has_triage_in_queue_fn=has_triage_in_queue,
+        resolve_reusable_report_fn=resolve_reusable_report,
+        record_sense_check_stage_fn=_record_sense_check_stage,
+        colorize_fn=colorize,
+        print_cascade_clear_feedback_fn=print_cascade_clear_feedback,
+        underspecified_steps_fn=_underspecified_steps,
+        steps_missing_issue_refs_fn=_steps_missing_issue_refs,
+        steps_with_bad_paths_fn=_steps_with_bad_paths,
+        steps_with_vague_detail_fn=_steps_with_vague_detail,
+        steps_without_effort_fn=_steps_without_effort,
+    )
+
+
 def cmd_stage_observe(
     args: argparse.Namespace,
     *,
@@ -373,6 +481,15 @@ def cmd_stage_reflect(
     _cmd_stage_reflect(args, services=services)
 
 
+def cmd_stage_enrich(
+    args: argparse.Namespace,
+    *,
+    services: TriageServices | None = None,
+) -> None:
+    """Public entrypoint for enrich stage recording."""
+    _cmd_stage_enrich(args, services=services)
+
+
 def cmd_stage_organize(
     args: argparse.Namespace,
     *,
@@ -382,11 +499,24 @@ def cmd_stage_organize(
     _cmd_stage_organize(args, services=services)
 
 
+def cmd_stage_sense_check(
+    args: argparse.Namespace,
+    *,
+    services: TriageServices | None = None,
+) -> None:
+    """Public entrypoint for sense-check stage recording."""
+    _cmd_stage_sense_check(args, services=services)
+
+
 __all__ = [
+    "cmd_stage_enrich",
     "cmd_stage_observe",
     "cmd_stage_organize",
     "cmd_stage_reflect",
+    "cmd_stage_sense_check",
+    "_cmd_stage_enrich",
     "_cmd_stage_observe",
     "_cmd_stage_organize",
     "_cmd_stage_reflect",
+    "_cmd_stage_sense_check",
 ]

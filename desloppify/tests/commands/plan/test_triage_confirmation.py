@@ -6,7 +6,7 @@ import argparse
 
 import desloppify.app.commands.plan.triage_handlers as triage_mod
 from desloppify.engine._plan.schema import empty_plan
-from desloppify.engine._plan.stale_dimensions import TRIAGE_STAGE_IDS
+from desloppify.engine._plan.constants import TRIAGE_STAGE_IDS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,7 +38,7 @@ def _plan_with_stages(*stage_names: str, confirmed: bool = False) -> dict:
         stages[name] = {
             "stage": name,
             "report": f"A sufficiently long report for {name} stage that meets minimum length requirements and more text",
-            "cited_ids": [],
+            "cited_ids": ["r1", "r2", "r3"],
             "timestamp": "2025-06-01T00:00:00Z",
             "issue_count": 5,
         }
@@ -130,6 +130,7 @@ class TestConfirmObserve:
         obs = plan["epic_triage_meta"]["triage_stages"]["observe"]
         assert obs.get("confirmed_at")
         assert obs.get("confirmed_text") == attestation
+        assert len(saved_plans) == 1
 
     def test_confirm_observe_requires_stage_recorded(self, monkeypatch, capsys):
         """Cannot confirm observe if stage not yet recorded."""
@@ -205,6 +206,28 @@ class TestConfirmReflect:
         out = capsys.readouterr().out
         assert "REFLECT" in out
         assert "strategy" in out.lower()
+
+    def test_confirm_reflect_records_single_save(self, monkeypatch, capsys):
+        """Reflect confirmation persists once after purge+log updates."""
+        plan = _plan_with_stages("observe", "reflect", confirmed=True)
+        plan["epic_triage_meta"]["triage_stages"]["reflect"].pop("confirmed_at", None)
+        plan["epic_triage_meta"]["triage_stages"]["reflect"].pop("confirmed_text", None)
+        state = _state_with_review_issues("r1", "r2")
+        saved_plans = []
+
+        monkeypatch.setattr(triage_mod, "load_plan", lambda *a, **kw: plan)
+        monkeypatch.setattr(triage_mod, "command_runtime", lambda args: _fake_runtime(state))
+        monkeypatch.setattr(triage_mod, "save_plan", lambda p, *a, **kw: saved_plans.append(True))
+        monkeypatch.setattr(triage_mod, "require_completed_scan", lambda s: True)
+
+        attestation = (
+            "I have thoroughly reviewed the abstraction fitness dimension strategy "
+            "in this plan and validated sequencing before organizing."
+        )
+        args = _fake_args(confirm="reflect", attestation=attestation)
+        triage_mod.cmd_plan_triage(args)
+
+        assert len(saved_plans) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +347,7 @@ class TestConfirmExistingRequiresConfirmed:
 
 class TestTriageStart:
     def test_start_injects_triage_stages(self, monkeypatch, capsys):
-        """--start injects all 4 triage stage IDs into the queue."""
+        """--start injects all triage stage IDs into the queue."""
         plan = empty_plan()
         state = _state_with_review_issues("r1", "r2")
 
@@ -355,3 +378,30 @@ class TestTriageStart:
         assert "clearing" in out.lower()
         stages = plan["epic_triage_meta"]["triage_stages"]
         assert stages == {}
+
+    def test_start_repairs_partial_triage_queue_and_skipped_overlap(self, monkeypatch, capsys):
+        """--start restores missing triage stages and clears triage skips."""
+        plan = empty_plan()
+        plan["queue_order"] = list(TRIAGE_STAGE_IDS[:3])
+        plan["skipped"] = {
+            "triage::enrich": {"kind": "temporary"},
+            "triage::sense-check": {"kind": "temporary"},
+            "triage::commit": {"kind": "temporary"},
+            "review::x.py::id1": {"kind": "temporary"},
+        }
+        state = _state_with_review_issues("r1")
+
+        monkeypatch.setattr(triage_mod, "load_plan", lambda *a, **kw: plan)
+        monkeypatch.setattr(triage_mod, "command_runtime", lambda args: _fake_runtime(state))
+        monkeypatch.setattr(triage_mod, "save_plan", lambda p, *a, **kw: None)
+        monkeypatch.setattr(triage_mod, "require_completed_scan", lambda s: True)
+
+        args = _fake_args(start=True)
+        triage_mod.cmd_plan_triage(args)
+        out = capsys.readouterr().out
+        assert "already in the queue" in out.lower()
+        assert plan["queue_order"][: len(TRIAGE_STAGE_IDS)] == list(TRIAGE_STAGE_IDS)
+        assert "triage::enrich" not in plan["skipped"]
+        assert "triage::sense-check" not in plan["skipped"]
+        assert "triage::commit" not in plan["skipped"]
+        assert "review::x.py::id1" in plan["skipped"]

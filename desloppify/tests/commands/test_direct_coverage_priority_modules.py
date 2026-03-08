@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
+
 import desloppify.app.commands.helpers.display as display_mod
 import desloppify.app.commands.next.render_support as next_render_support_mod
 import desloppify.app.commands.helpers.persist as helpers_persist_mod
@@ -29,6 +32,7 @@ import desloppify.engine._scoring.results.health as scoring_health_mod
 import desloppify.engine._scoring.results.impact as scoring_impact_mod
 import desloppify.engine._state.schema_scores as schema_scores_mod
 import desloppify.engine._work_queue.plan_order as work_queue_plan_order_mod
+import desloppify.engine._work_queue.synthetic as work_queue_synthetic_mod
 import desloppify.engine.planning as planning_pkg
 import desloppify.engine.planning.dimension_rows as planning_dimension_rows_mod
 import desloppify.engine.planning.render_sections as planning_render_sections_mod
@@ -38,7 +42,7 @@ import desloppify.intelligence.narrative.signals as narrative_signals_mod
 import desloppify.intelligence.review.context_holistic.selection_contexts as selection_contexts_mod
 import desloppify.intelligence.review.selection_cache as review_selection_cache_mod
 import desloppify.languages._framework.scoped_store as scoped_store_mod
-import desloppify.languages.csharp.detectors.deps_support as csharp_deps_support_mod
+import desloppify.languages.csharp.detectors.deps_support_projects as csharp_deps_support_mod
 import desloppify.languages.python.detectors.deps_dynamic as py_deps_dynamic_mod
 import desloppify.languages.python.detectors.deps_resolution as py_deps_resolution_mod
 import desloppify.languages.python.detectors.smells_runtime as py_smells_runtime_mod
@@ -121,3 +125,43 @@ def test_review_import_parse_normalizes_legacy_findings_alias():
     )
     assert errors == []
     assert payload == {"issues": []}
+
+
+def test_engine_modules_avoid_app_layer_import_paths():
+    synthetic_src = inspect.getsource(work_queue_synthetic_mod.build_triage_stage_items)
+    assert "desloppify.app.commands.plan.triage_playbook" not in synthetic_src
+
+    dimension_rows_src = inspect.getsource(planning_dimension_rows_mod)
+    assert "desloppify.app.output.scorecard_parts.dimensions" not in dimension_rows_src
+
+
+def test_app_plan_modules_avoid_private_engine_plan_imports():
+    package_root = Path(__file__).resolve().parents[2]
+    rel_paths = [
+        "app/commands/plan/cmd.py",
+        "app/commands/plan/cluster_handlers.py",
+        "app/commands/plan/override_io.py",
+        "app/commands/plan/override_misc.py",
+        "app/commands/plan/override_skip.py",
+        "app/commands/plan/override_resolve_cmd.py",
+        "app/commands/plan/override_resolve_helpers.py",
+        "app/commands/plan/triage/helpers.py",
+        "app/commands/plan/triage/runner/stage_validation.py",
+        "app/commands/plan/triage/runner/stage_prompts.py",
+        "app/commands/plan/triage_playbook.py",
+        "app/commands/resolve/cmd.py",
+        "app/commands/review/importing/cmd.py",
+    ]
+    for rel_path in rel_paths:
+        text = (package_root / rel_path).read_text(encoding="utf-8")
+        assert "desloppify.engine._plan" not in text
+
+
+def test_next_and_status_init_modules_are_stub_only():
+    package_root = Path(__file__).resolve().parents[2]
+    for rel_path in (
+        "app/commands/next/__init__.py",
+        "app/commands/status/__init__.py",
+    ):
+        text = (package_root / rel_path).read_text(encoding="utf-8")
+        assert "__getattr__" not in text

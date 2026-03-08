@@ -15,10 +15,12 @@ from .helpers import (
     triage_coverage,
 )
 from .services import TriageServices, default_triage_services
-from ._stage_records import _record_confirm_existing_completion
+from ._stage_records import record_confirm_existing_completion
 from ._stage_rendering import _print_complete_summary
 from ._stage_validation import (
+    _auto_confirm_enrich_for_complete,
     _auto_confirm_organize_for_complete,
+    _auto_confirm_sense_check_for_complete,
     _completion_clusters_valid,
     _completion_strategy_valid,
     _confirm_existing_stages_valid,
@@ -26,7 +28,9 @@ from ._stage_validation import (
     _confirm_strategy_valid,
     _confirmed_text_or_error,
     _note_cites_new_issues_or_error,
+    _require_enrich_stage_for_complete,
     _require_organize_stage_for_complete,
+    _require_sense_check_stage_for_complete,
     _require_prior_strategy_for_confirm,
     _resolve_completion_strategy,
     _resolve_confirm_existing_strategy,
@@ -67,12 +71,47 @@ def _cmd_triage_complete(
         plan=plan,
         stages=stages,
         attestation=attestation,
+        save_plan_fn=resolved_services.save_plan,
+    ):
+        return
+
+    # Require enrich stage confirmed
+    if not _require_enrich_stage_for_complete(
+        plan=plan,
+        meta=meta,
+        stages=stages,
+    ):
+        return
+
+    # Fold-confirm: auto-confirm enrich if attestation provided
+    if not _auto_confirm_enrich_for_complete(
+        plan=plan,
+        stages=stages,
+        attestation=attestation,
+        save_plan_fn=resolved_services.save_plan,
+    ):
+        return
+
+    # Require sense-check stage confirmed
+    if not _require_sense_check_stage_for_complete(
+        plan=plan,
+        meta=meta,
+        stages=stages,
+    ):
+        return
+
+    # Fold-confirm: auto-confirm sense-check if attestation provided
+    if not _auto_confirm_sense_check_for_complete(
+        plan=plan,
+        stages=stages,
+        attestation=attestation,
+        save_plan_fn=resolved_services.save_plan,
     ):
         return
 
     # Re-validate cluster enrichment at completion time (prevents bypassing
     # organize gate by editing plan.json directly)
-    if not _completion_clusters_valid(plan):
+    if not _completion_clusters_valid(plan, state):
         return
 
     # Verify cluster coverage
@@ -107,7 +146,7 @@ def _cmd_triage_complete(
     print()
     print(
         colorize(
-            "  To revise an earlier stage: desloppify plan triage --stage <observe|reflect|organize>",
+            "  To revise an earlier stage: desloppify plan triage --stage <observe|reflect|organize|enrich|sense-check>",
             "dim",
         )
     )
@@ -207,7 +246,7 @@ def _cmd_confirm_existing(
 
     # Record organize as confirmed-existing and complete
     stages = meta.setdefault("triage_stages", {})
-    _record_confirm_existing_completion(
+    record_confirm_existing_completion(
         stages=stages,
         note=note,
         issue_count=len(clusters_with_issues),

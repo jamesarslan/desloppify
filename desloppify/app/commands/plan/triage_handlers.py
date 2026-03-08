@@ -74,6 +74,8 @@ def _cmd_triage_start(
             resolved_services.save_plan(plan)
             print(colorize("  Stages cleared. Begin with observe:", "green"))
         else:
+            _helpers_mod.inject_triage_stages(plan)
+            resolved_services.save_plan(plan)
             print(colorize("  Begin with observe:", "green"))
         print(colorize(f"    {TRIAGE_CMD_OBSERVE}", "dim"))
         return
@@ -93,18 +95,41 @@ def _cmd_triage_start(
 
     runtime = resolved_services.command_runtime(args)
     si = resolved_services.collect_triage_input(plan, runtime.state)
-    print(colorize("  Planning mode started (4 stages queued).", "green"))
+    print(colorize("  Planning mode started (6 stages queued).", "green"))
     print(f"  Open review issues: {len(si.open_issues)}")
     print(colorize("  Begin with observe:", "dim"))
     print(colorize(f"    {TRIAGE_CMD_OBSERVE}", "dim"))
 
 
 def cmd_plan_triage(args: argparse.Namespace) -> None:
-    """Run epic triage: staged workflow OBSERVE → REFLECT → ORGANIZE → COMMIT."""
+    """Run epic triage: staged workflow OBSERVE → REFLECT → ORGANIZE → ENRICH → COMMIT."""
     resolved_services = _build_triage_services()
     runtime = resolved_services.command_runtime(args)
     state = runtime.state
     if not require_completed_scan(state):
+        return
+
+    if getattr(args, "stage_prompt", None):
+        from .triage.runner.stage_prompts import cmd_stage_prompt
+        cmd_stage_prompt(args, services=resolved_services)
+        return
+    if getattr(args, "run_stages", False):
+        from desloppify.base.output.terminal import colorize
+        from .triage.runner.orchestrator_common import parse_only_stages
+        runner = str(getattr(args, "runner", "codex")).strip().lower()
+        try:
+            stages_to_run = parse_only_stages(getattr(args, "only_stages", None))
+        except ValueError as exc:
+            print(colorize(f"  {exc}", "red"))
+            return
+        if runner == "claude":
+            from .triage.runner.orchestrator_claude import run_claude_orchestrator
+            run_claude_orchestrator(args, services=resolved_services)
+        elif runner == "codex":
+            from .triage.runner.orchestrator_codex_pipeline import run_codex_pipeline
+            run_codex_pipeline(args, stages_to_run=stages_to_run, services=resolved_services)
+        else:
+            print(colorize(f"  Unknown runner: {runner}. Use 'codex' or 'claude'.", "red"))
         return
 
     if getattr(args, "start", False):
@@ -129,6 +154,12 @@ def cmd_plan_triage(args: argparse.Namespace) -> None:
         return
     if stage == "organize":
         _flow_mod.cmd_stage_organize(args, services=resolved_services)
+        return
+    if stage == "enrich":
+        _flow_mod.cmd_stage_enrich(args, services=resolved_services)
+        return
+    if stage == "sense-check":
+        _flow_mod.cmd_stage_sense_check(args, services=resolved_services)
         return
 
     if getattr(args, "dry_run", False):

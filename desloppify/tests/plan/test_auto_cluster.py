@@ -23,6 +23,9 @@ from desloppify.engine._work_queue.core import (
 from desloppify.engine._work_queue.plan_order import (
     collapse_clusters as _collapse_clusters,
 )
+from desloppify.engine._work_queue.plan_order import (
+    filter_cluster_focus,
+)
 from desloppify.engine._work_queue.ranking import item_sort_key
 
 # ---------------------------------------------------------------------------
@@ -409,11 +412,12 @@ def test_build_work_queue_no_collapse_when_drilling():
         options=QueueBuildOptions(
             plan=plan,
             count=10,
-            cluster="auto/unused",  # drilling into cluster
         ),
     )
+    # Apply cluster focus at the call site (as production code now does)
+    items = filter_cluster_focus(result["items"], plan, "auto/unused")
     # When drilling, items should be individual issues, not collapsed
-    for item in result["items"]:
+    for item in items:
         assert item.get("kind") != "cluster"
 
 
@@ -424,7 +428,9 @@ def test_build_work_queue_no_collapse_when_drilling():
 def test_generate_action_always_returns_something():
     """Every detector/subtype combination must produce a non-None action."""
     from desloppify.base.registry import DETECTORS
-    from desloppify.engine._plan.cluster_strategy import generate_action as _generate_action
+    from desloppify.engine._plan.cluster_strategy import (
+        generate_action as _generate_action,
+    )
 
     # No metadata → fallback
     assert _generate_action(None, None) == "review and fix each issue"
@@ -440,7 +446,9 @@ def test_generate_action_always_returns_something():
 
 def test_generate_action_strips_subtype_examples():
     """Guidance with ' — ' should be stripped to the core verb for subtypes."""
-    from desloppify.engine._plan.cluster_strategy import strip_guidance_examples as _strip_guidance_examples
+    from desloppify.engine._plan.cluster_strategy import (
+        strip_guidance_examples as _strip_guidance_examples,
+    )
 
     assert _strip_guidance_examples("fix code smells — dead useEffect, empty if chains") == "fix code smells"
     assert _strip_guidance_examples("fix dict key mismatches — dead writes are likely dead code") == "fix dict key mismatches"
@@ -867,6 +875,37 @@ def test_under_target_evicted_when_objective_backlog_returns():
         }
     ]
     assert subjective_ut == []
+
+
+def test_stale_ids_evicted_when_objective_backlog_returns():
+    """Stale subjective IDs must not stay in queue when objective issues exist."""
+    plan = empty_plan()
+    stale_state = _stale_state("design_coherence", "error_consistency", score=50.0)
+    plan["queue_order"] = [
+        "subjective::design_coherence",
+        "subjective::error_consistency",
+    ]
+
+    # Step 1: no objective items -> stale IDs remain present
+    state_no_obj = {**stale_state, "issues": {}}
+    auto_cluster_issues(plan, state_no_obj)
+    order = plan["queue_order"]
+    assert "subjective::design_coherence" in order
+    assert "subjective::error_consistency" in order
+
+    # Step 2: objective issues reappear -> stale IDs should be evicted
+    state_with_obj = {
+        **stale_state,
+        "issues": {
+            "u1": _issue("u1", "unused"),
+            "u2": _issue("u2", "unused"),
+        },
+    }
+    auto_cluster_issues(plan, state_with_obj)
+
+    order = plan["queue_order"]
+    assert "subjective::design_coherence" not in order
+    assert "subjective::error_consistency" not in order
 
 
 def test_under_target_lifecycle_inject_then_evict():

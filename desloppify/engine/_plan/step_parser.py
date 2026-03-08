@@ -12,6 +12,63 @@ _STEP_HEADER_RE = re.compile(r"^(\d+)\.\s+(.+)$")
 _REFS_RE = re.compile(r"^\s*Refs?:\s*(.+)$", re.IGNORECASE)
 
 
+def _flush_step(
+    *,
+    steps: list[ActionStep],
+    current: ActionStep | None,
+    detail_lines: list[str],
+) -> tuple[ActionStep | None, list[str]]:
+    """Finalize current step into ``steps`` and reset parser state."""
+    if current is None:
+        return None, []
+    detail = "\n".join(detail_lines).strip()
+    if detail:
+        current["detail"] = detail
+    steps.append(current)
+    return None, []
+
+
+def _consume_indented_line(
+    line: str,
+    *,
+    current: ActionStep,
+    detail_lines: list[str],
+) -> None:
+    """Parse an indented line as either refs metadata or detail text."""
+    ref_match = _REFS_RE.match(line)
+    if ref_match:
+        refs = [ref.strip() for ref in ref_match.group(1).split(",") if ref.strip()]
+        current.setdefault("issue_refs", []).extend(refs)
+        return
+    detail_lines.append(line.strip())
+
+
+def _format_step_lines(index: int, step: str | dict) -> list[str]:
+    """Render a single step block into numbered text lines."""
+    if isinstance(step, str):
+        return [f"{index}. {step}", ""]
+    if not isinstance(step, dict):
+        return [""]
+
+    lines: list[str] = []
+    title = step.get("title", "")
+    done = step.get("done", False)
+    prefix = "[x] " if done else ""
+    lines.append(f"{index}. {prefix}{title}")
+
+    detail = step.get("detail", "")
+    if detail:
+        for detail_line in detail.splitlines():
+            lines.append(f"   {detail_line}")
+
+    refs = step.get("issue_refs", [])
+    if refs:
+        lines.append(f"   Refs: {', '.join(refs)}")
+
+    lines.append("")
+    return lines
+
+
 def parse_steps_file(text: str) -> list[ActionStep]:
     """Parse a numbered-steps text format into ActionStep dicts.
 
@@ -29,21 +86,14 @@ def parse_steps_file(text: str) -> list[ActionStep]:
     current: ActionStep | None = None
     detail_lines: list[str] = []
 
-    def _flush() -> None:
-        nonlocal current, detail_lines
-        if current is None:
-            return
-        detail = "\n".join(detail_lines).strip()
-        if detail:
-            current["detail"] = detail
-        steps.append(current)
-        current = None
-        detail_lines = []
-
     for line in text.splitlines():
         m = _STEP_HEADER_RE.match(line)
         if m:
-            _flush()
+            current, detail_lines = _flush_step(
+                steps=steps,
+                current=current,
+                detail_lines=detail_lines,
+            )
             current = {"title": m.group(2).strip()}
             continue
 
@@ -52,20 +102,22 @@ def parse_steps_file(text: str) -> list[ActionStep]:
 
         # Indented continuation line
         if line and (line[0] == " " or line[0] == "\t"):
-            stripped = line.strip()
-            ref_match = _REFS_RE.match(line)
-            if ref_match:
-                refs = [r.strip() for r in ref_match.group(1).split(",") if r.strip()]
-                current.setdefault("issue_refs", []).extend(refs)
-            else:
-                detail_lines.append(stripped)
+            _consume_indented_line(
+                line,
+                current=current,
+                detail_lines=detail_lines,
+            )
         elif line.strip() == "":
             # Blank line within detail — preserve it
             if detail_lines:
                 detail_lines.append("")
         # Non-indented non-blank line that isn't a step header: ignore
 
-    _flush()
+    current, detail_lines = _flush_step(
+        steps=steps,
+        current=current,
+        detail_lines=detail_lines,
+    )
     return steps
 
 
@@ -77,21 +129,7 @@ def format_steps(steps: list[str | dict]) -> str:
     """
     lines: list[str] = []
     for i, step in enumerate(steps, 1):
-        if isinstance(step, str):
-            lines.append(f"{i}. {step}")
-        elif isinstance(step, dict):
-            title = step.get("title", "")
-            done = step.get("done", False)
-            prefix = "[x] " if done else ""
-            lines.append(f"{i}. {prefix}{title}")
-            detail = step.get("detail", "")
-            if detail:
-                for dline in detail.splitlines():
-                    lines.append(f"   {dline}")
-            refs = step.get("issue_refs", [])
-            if refs:
-                lines.append(f"   Refs: {', '.join(refs)}")
-        lines.append("")
+        lines.extend(_format_step_lines(i, step))
     return "\n".join(lines)
 
 

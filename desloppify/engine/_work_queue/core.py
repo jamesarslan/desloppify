@@ -5,17 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
-from desloppify.engine._plan.subjective_policy import NON_OBJECTIVE_DETECTORS
 from desloppify.engine._work_queue.context import QueueContext
 from desloppify.engine._work_queue.helpers import (
     ALL_STATUSES,
     ATTEST_EXAMPLE,
     scope_matches,
 )
+from desloppify.engine._work_queue.lifecycle import apply_lifecycle_filter
 from desloppify.engine._work_queue.plan_order import (
     collapse_clusters,
     enrich_plan_metadata,
-    filter_cluster_focus,
     separate_skipped,
     stamp_plan_sort_keys,
     stamp_positions,
@@ -41,9 +40,15 @@ from desloppify.engine._work_queue.synthetic import (
 from desloppify.engine._work_queue.types import WorkQueueItem
 from desloppify.state import StateModel
 
+
+class _ScanPathFromState:
+    """Sentinel type: resolve scan_path from state."""
+
+
 # Sentinel: "read scan_path from state" (the safe default).
 # Callers that want to override can pass an explicit str or None.
-_SCAN_PATH_FROM_STATE = object()
+_SCAN_PATH_FROM_STATE = _ScanPathFromState()
+ScanPathOption = str | None | _ScanPathFromState
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ class QueueBuildOptions:
     explain: bool = False
 
     # Scope filtering
-    scan_path: str | None | object = _SCAN_PATH_FROM_STATE
+    scan_path: ScanPathOption = _SCAN_PATH_FROM_STATE
     scope: str | None = None
     status: str = "open"
     chronic: bool = False
@@ -72,7 +77,6 @@ class QueueBuildOptions:
     # Plan integration
     plan: dict | None = None
     include_skipped: bool = False
-    cluster: str | None = None
 
     # Pre-computed context (overrides plan)
     context: QueueContext | None = None
@@ -120,7 +124,7 @@ def build_work_queue(
     new_ids, skipped = _plan_presort(items, state, plan)
 
     # 4. Lifecycle filter — endgame-only items filtered when objective work remains
-    items = _apply_lifecycle_filter(items)
+    items = apply_lifecycle_filter(items)
 
     # 5. Sort & plan post-processing
     items.sort(key=item_sort_key)
@@ -158,8 +162,8 @@ def _resolve_inputs(
 
     scan_path: str | None = (
         state.get("scan_path")
-        if opts.scan_path is _SCAN_PATH_FROM_STATE
-        else opts.scan_path  # type: ignore[assignment]
+        if isinstance(opts.scan_path, _ScanPathFromState)
+        else opts.scan_path
     )
 
     status = opts.status
@@ -182,7 +186,7 @@ def _gather_subjective_items(
 ) -> list[WorkQueueItem]:
     """Build subjective dimension candidates.
 
-    Lifecycle filtering (endgame gating) happens in _apply_lifecycle_filter,
+    Lifecycle filtering (endgame gating) happens in ``apply_lifecycle_filter``,
     not here. This function only handles configuration and scope.
     """
     if not opts.include_subjective:
@@ -246,64 +250,19 @@ def _plan_postsort(
     plan: dict | None,
     opts: QueueBuildOptions,
 ) -> None:
-    """Re-append skipped items, stamp positions, filter to cluster focus."""
+    """Re-append skipped items and stamp positions.
+
+    Cluster focus filtering is intentionally NOT applied here — it is a
+    view-layer concern that callers apply after building the canonical queue.
+    This prevents UI focus state from affecting lifecycle decisions (scan
+    gating, score display mode, empty-queue fallback).
+    """
     if not plan:
         return
 
     if opts.include_skipped:
         items.extend(skipped)
     stamp_positions(items, plan)
-    focused = filter_cluster_focus(items, plan, opts.cluster)
-    items[:] = focused
-
-
-def _has_objective_items(items: list[WorkQueueItem]) -> bool:
-    """True if any objective mechanical work items remain in the queue."""
-    return any(
-        i.get("kind") == "issue"
-        and i.get("detector", "") not in NON_OBJECTIVE_DETECTORS
-        for i in items
-    )
-
-
-def _has_initial_reviews(items: list[WorkQueueItem]) -> bool:
-    """True if any unassessed subjective dimensions need initial review."""
-    return any(
-        i.get("kind") == "subjective_dimension"
-        and i.get("initial_review")
-        for i in items
-    )
-
-
-def _is_endgame_only(item: WorkQueueItem) -> bool:
-    """True if this item should only appear when the objective queue is drained."""
-    return (
-        item.get("kind") == "subjective_dimension"
-        and not item.get("initial_review")
-    )
-
-
-def _apply_lifecycle_filter(items: list[WorkQueueItem]) -> list[WorkQueueItem]:
-    """Enforce lifecycle visibility rules.
-
-    The queue enforces a phase order: scan → initial review → objective work.
-
-    1. **Initial reviews pending** → only show initial-review subjective items.
-       The user must complete first-time reviews before working objective items.
-    2. **Objective work remains** → show objective items, hide endgame-only
-       subjective reassessments (stale re-reviews).
-    3. **Objective drained** → everything visible (endgame).
-    """
-    if _has_initial_reviews(items):
-        # Phase 1: only initial reviews visible — triage and workflow
-        # items stay hidden until initial reviews are complete.
-        return [
-            i for i in items
-            if i.get("kind") == "subjective_dimension" and i.get("initial_review")
-        ]
-    if not _has_objective_items(items):
-        return items  # endgame: everything visible
-    return [i for i in items if not _is_endgame_only(i)]
 
 
 def _empty_queue_fallback(plan: dict | None) -> list[WorkQueueItem]:

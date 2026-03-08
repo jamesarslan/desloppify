@@ -868,7 +868,7 @@ class TestCmdReviewPrepare:
         args.packet = str(packet_path)
         args.only_batches = None
         args.scan_after_import = False
-        args.allow_partial = False
+        args.allow_partial = True
 
         review_packet_dir = tmp_path / ".desloppify" / "review_packets"
         runs_dir = tmp_path / ".desloppify" / "subagents" / "runs"
@@ -1044,7 +1044,7 @@ class TestCmdReviewPrepare:
             captured["kwargs"]["trusted_assessment_label"]
             == "trusted internal run-batches import"
         )
-        assert captured["kwargs"]["allow_partial"] is False
+        assert captured["kwargs"]["allow_partial"] is True
         summary_files = sorted(runs_dir.glob("*/run_summary.json"))
         assert len(summary_files) == 1
         summary_payload = json.loads(summary_files[0].read_text())
@@ -1189,7 +1189,7 @@ class TestCmdReviewPrepare:
         args.packet = str(packet_path)
         args.only_batches = None
         args.scan_after_import = False
-        args.allow_partial = False
+        args.allow_partial = True
 
         review_packet_dir = tmp_path / ".desloppify" / "review_packets"
         runs_dir = tmp_path / ".desloppify" / "subagents" / "runs"
@@ -1306,7 +1306,7 @@ class TestCmdReviewPrepare:
         args.packet = str(packet_path)
         args.only_batches = None
         args.scan_after_import = False
-        args.allow_partial = False
+        args.allow_partial = True
 
         review_packet_dir = tmp_path / ".desloppify" / "review_packets"
         runs_dir = tmp_path / ".desloppify" / "subagents" / "runs"
@@ -1863,14 +1863,19 @@ class TestCmdReviewPrepare:
         assert "Recovered stalled batch from JSON output file" in log_text
 
     def test_run_codex_batch_stall_without_output_file_times_out(self, tmp_path):
+        """When no output file exists, stall detection does NOT trigger early.
 
+        The batch runs to completion (or real timeout).  The process here
+        finishes in <10s with exit 0, but the output file is missing, so
+        the runner reports code 1 (output missing/invalid).
+        """
         log_file = tmp_path / "batch.log"
         output_file = tmp_path / "out.json"
 
         command = [
             sys.executable,
             "-c",
-            "import time; time.sleep(10)",
+            "import time; time.sleep(2)",
         ]
 
         with patch(
@@ -1894,10 +1899,11 @@ class TestCmdReviewPrepare:
                 ),
             )
 
-        assert code == 124
+        # Stall detection should NOT have fired — no output file means
+        # the batch was still initialising.
+        assert code == 1  # process exited 0 but output file missing
         log_text = log_file.read_text()
-        assert "STALL RECOVERY" in log_text
-        assert "Recovered stalled batch from JSON output file" not in log_text
+        assert "STALL RECOVERY" not in log_text
 
     def test_collect_batch_results_recovers_execution_failure_with_valid_output(
         self, tmp_path
@@ -1923,7 +1929,7 @@ class TestCmdReviewPrepare:
 
         def normalize_result(payload, _allowed_dims):
             notes = payload.get("dimension_notes", {})
-            return payload.get("assessments", {}), payload.get("issues", []), notes, {}
+            return payload.get("assessments", {}), payload.get("issues", []), notes, {}, {}
 
         batch_results, failures = runner_helpers_mod.collect_batch_results(
             selected_indexes=[0],
@@ -1983,6 +1989,7 @@ class TestCmdReviewPrepare:
                 payload.get("assessments", {}),
                 payload.get("issues", []),
                 payload.get("dimension_notes", {}),
+                payload.get("dimension_judgment", {}),
                 {},
             ),
         )

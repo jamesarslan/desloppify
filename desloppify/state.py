@@ -33,8 +33,6 @@ from desloppify.engine._state.resolution import (
 )
 from desloppify.engine._state.schema import (
     CURRENT_VERSION,
-    STATE_DIR,
-    STATE_FILE,
     ConcernDismissal,
     DimensionScore,
     Issue,
@@ -44,6 +42,8 @@ from desloppify.engine._state.schema import (
     SubjectiveIntegrity,
     empty_state,
     ensure_state_defaults,
+    get_state_dir,
+    get_state_file,
     json_default,
     migrate_state_keys,
     utc_now,
@@ -94,8 +94,8 @@ __all__ = [
     "CURRENT_VERSION",
     "DEFAULT_ISSUE_NOISE_BUDGET",
     "DEFAULT_ISSUE_NOISE_GLOBAL_BUDGET",
-    "STATE_DIR",
-    "STATE_FILE",
+    "get_state_dir",
+    "get_state_file",
     # Functions
     "add_ignore",
     "apply_issue_noise_budget",

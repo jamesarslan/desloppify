@@ -13,6 +13,7 @@ from desloppify.base.coercions import coerce_positive_int
 from desloppify.base.discovery.file_paths import safe_write_text
 from desloppify.base.exception_sets import CommandError, PacketValidationError
 from desloppify.base.output.terminal import colorize, log
+from desloppify.base.search.query_paths import query_file_path
 import desloppify.intelligence.narrative.core as narrative_mod
 from desloppify.intelligence import review as review_mod
 from desloppify.intelligence.review.feedback_contract import (
@@ -51,7 +52,12 @@ from ..runtime_paths import (
 from ..runtime_paths import (
     subagent_runs_dir as _subagent_runs_dir,
 )
-from . import core as batch_core_mod
+from .core_merge_support import assessment_weight  # noqa: F401 — re-exported
+from .core_models import BatchResultPayload
+from .core_normalize import normalize_batch_result
+from .core_parse import extract_json_payload, parse_batch_selection
+from .merge import merge_batch_results
+from .prompt_template import render_batch_prompt
 from . import execution as review_batches_mod
 
 FOLLOWUP_SCAN_TIMEOUT_SECONDS = 45 * 60
@@ -74,18 +80,42 @@ ABSTRACTION_COMPONENT_NAMES = {
 
 
 
+def _try_load_prepared_packet() -> dict | None:
+    """Load a prepared holistic packet from query.json if it looks valid.
+
+    Returns the packet dict when query.json exists, parses as JSON, and
+    contains the ``investigation_batches`` key written by ``--prepare``.
+    Returns ``None`` otherwise (missing file, parse error, wrong shape).
+    """
+    try:
+        qf = query_file_path()
+        if not qf.exists():
+            return None
+        data = json.loads(qf.read_text())
+    except (OSError, json.JSONDecodeError, RuntimeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if "investigation_batches" not in data:
+        return None
+    batches = data["investigation_batches"]
+    if not isinstance(batches, list) or not batches:
+        return None
+    return data
+
+
 def _merge_batch_results(batch_results: list[object]) -> dict[str, object]:
     """Deterministically merge assessments/issues across batch outputs."""
-    normalized_results: list[batch_core_mod.BatchResultPayload] = []
+    normalized_results: list[BatchResultPayload] = []
     for result in batch_results:
         if hasattr(result, "to_dict") and callable(result.to_dict):
             payload = result.to_dict()
             if isinstance(payload, dict):
-                normalized_results.append(cast(batch_core_mod.BatchResultPayload, payload))
+                normalized_results.append(cast(BatchResultPayload, payload))
                 continue
         if isinstance(result, dict):
-            normalized_results.append(cast(batch_core_mod.BatchResultPayload, result))
-    return batch_core_mod.merge_batch_results(
+            normalized_results.append(cast(BatchResultPayload, result))
+    return merge_batch_results(
         normalized_results,
         abstraction_sub_axes=ABSTRACTION_SUB_AXES,
         abstraction_component_names=ABSTRACTION_COMPONENT_NAMES,
@@ -117,8 +147,29 @@ def _load_or_prepare_packet(
         print(colorize(f"  Blind packet: {blind_path}", "dim"))
         return packet, packet_path, blind_path
 
-    path = Path(args.path)
+    # When no explicit --packet and no explicit --dimensions were given,
+    # check whether a prior ``review --prepare`` left a valid query.json
+    # packet we can reuse instead of rebuilding from scratch.
     dims = parse_dimensions(args)
+    if not dims:
+        prepared = _try_load_prepared_packet()
+        if prepared is not None:
+            print(colorize("  Reusing prepared packet from query.json", "dim"))
+            blind_path = _blind_packet_path()
+            blind_packet = build_blind_packet(prepared)
+            safe_write_text(blind_path, json.dumps(blind_packet, indent=2) + "\n")
+            packet_path, blind_saved = write_packet_snapshot(
+                prepared,
+                stamp=stamp,
+                review_packet_dir=_review_packet_dir(),
+                blind_path=blind_path,
+                safe_write_text_fn=safe_write_text,
+            )
+            print(colorize(f"  Immutable packet: {packet_path}", "dim"))
+            print(colorize(f"  Blind packet: {blind_saved}", "dim"))
+            return prepared, packet_path, blind_saved
+
+    path = Path(args.path)
     dimensions = list(dims) if dims else None
     retrospective = bool(getattr(args, "retrospective", False))
     retrospective_max_issues = coerce_positive_int(
@@ -203,7 +254,7 @@ def do_run_batches(args, state, lang, state_file, config: dict | None = None) ->
             packet_path=packet_path,
             run_root=run_root,
             repo_root=repo_root,
-            build_prompt_fn=batch_core_mod.build_batch_prompt,
+            build_prompt_fn=render_batch_prompt,
             safe_write_text_fn=safe_write_text,
             colorize_fn=colorize,
         )
@@ -214,8 +265,8 @@ def do_run_batches(args, state, lang, state_file, config: dict | None = None) ->
             failures=failures,
             output_files=output_files,
             allowed_dims=allowed_dims,
-            extract_payload_fn=lambda raw: batch_core_mod.extract_json_payload(raw, log_fn=log),
-            normalize_result_fn=lambda payload, dims: batch_core_mod.normalize_batch_result(
+            extract_payload_fn=lambda raw: extract_json_payload(raw, log_fn=log),
+            normalize_result_fn=lambda payload, dims: normalize_batch_result(
                 payload,
                 dims,
                 max_batch_issues=max_batch_issues_for_dimension_count(
@@ -236,7 +287,7 @@ def do_run_batches(args, state, lang, state_file, config: dict | None = None) ->
         selected_batch_indexes_fn=lambda args, *, batch_count: selected_batch_indexes(
             raw_selection=getattr(args, "only_batches", None),
             batch_count=batch_count,
-            parse_fn=batch_core_mod.parse_batch_selection,
+            parse_fn=parse_batch_selection,
             colorize_fn=colorize,
         ),
         prepare_run_artifacts_fn=_prepare_run_artifacts,
@@ -327,6 +378,7 @@ def do_import_run(
     allow_partial: bool = False,
     scan_after_import: bool = False,
     scan_path: str = ".",
+    dry_run: bool = False,
 ) -> None:
     """Re-import results from a completed run directory.
 
@@ -360,8 +412,8 @@ def do_import_run(
         failures=[],
         output_files=output_files,
         allowed_dims=allowed_dims,
-        extract_payload_fn=lambda raw: batch_core_mod.extract_json_payload(raw, log_fn=log),
-        normalize_result_fn=lambda payload, dims: batch_core_mod.normalize_batch_result(
+        extract_payload_fn=lambda raw: extract_json_payload(raw, log_fn=log),
+        normalize_result_fn=lambda payload, dims: normalize_batch_result(
             payload,
             dims,
             max_batch_issues=max_batch_issues_for_dimension_count(len(dims)),
@@ -388,7 +440,7 @@ def do_import_run(
         batch_indexes=successful_indexes,
     )
 
-    # -- write merged output --
+    # -- write merged output (always — this is inside the run dir, not state) --
     merged_path = run_dir / "holistic_issues_merged.json"
     safe_write_text(merged_path, json.dumps(merged, indent=2) + "\n")
     print(colorize(f"  Merged output: {merged_path}", "bold"))
@@ -403,10 +455,11 @@ def do_import_run(
         allow_partial=allow_partial,
         trusted_assessment_source=True,
         trusted_assessment_label=f"trusted import-run replay from {run_dir.name}",
+        dry_run=dry_run,
     )
 
     # -- optional follow-up scan --
-    if scan_after_import:
+    if scan_after_import and not dry_run:
         lang_name = getattr(lang, "name", None) or str(getattr(lang, "lang", ""))
         if lang_name:
             run_followup_scan(

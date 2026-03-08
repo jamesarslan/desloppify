@@ -96,11 +96,11 @@ def build_triage_stage_items(plan: dict, state: dict) -> list[WorkQueueItem]:
 
     Returns an empty list when no triage stages are pending.
     """
-    from desloppify.app.commands.plan.triage_playbook import (
+    from desloppify.engine._plan.triage_playbook import (
         TRIAGE_STAGE_DEPENDENCIES,
         TRIAGE_STAGE_LABELS,
     )
-    from desloppify.engine._plan.stale_dimensions import (
+    from desloppify.engine._plan.constants import (
         TRIAGE_IDS,
         TRIAGE_STAGE_IDS,
     )
@@ -122,7 +122,7 @@ def build_triage_stage_items(plan: dict, state: dict) -> list[WorkQueueItem]:
     )
 
     label_map = dict(TRIAGE_STAGE_LABELS)
-    stage_names = ("observe", "reflect", "organize", "commit")
+    stage_names = ("observe", "reflect", "organize", "enrich", "sense-check", "commit")
 
     items: list[WorkQueueItem] = []
     for sid, name in zip(TRIAGE_STAGE_IDS, stage_names, strict=False):

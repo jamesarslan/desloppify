@@ -209,10 +209,6 @@ def _sync_plan_after_import(state: dict, diff: dict, assessment_mode: str) -> No
     import-scores, and communicate-score workflow items as needed.
     """
     try:
-        from desloppify.engine._plan.stale_dimensions import (
-            sync_communicate_score_needed,
-            sync_import_scores_needed,
-        )
         from desloppify.engine.plan import (
             append_log_entry,
             current_unscored_ids,
@@ -220,7 +216,9 @@ def _sync_plan_after_import(state: dict, diff: dict, assessment_mode: str) -> No
             load_plan,
             purge_ids,
             save_plan,
+            sync_communicate_score_needed,
             sync_create_plan_needed,
+            sync_import_scores_needed,
             sync_plan_after_review_import,
             sync_score_checkpoint_needed,
         )
@@ -332,6 +330,7 @@ def do_import(
     attested_external: bool = False,
     manual_override: bool = False,
     manual_attest: str | None = None,
+    dry_run: bool = False,
 ) -> None:
     """Import mode: ingest agent-produced issues."""
     import_config = ReviewImportConfig(
@@ -441,15 +440,18 @@ def do_import(
                 "import_file": str(import_file),
             }
         )
-    state.clear()
-    state.update(working_state)
-    state_mod.save_state(state, state_file)
+    if not dry_run:
+        state.clear()
+        state.update(working_state)
+        state_mod.save_state(state, state_file)
 
-    # Sync plan: issue sync (if new issues) + workflow items (always).
-    _sync_plan_after_import(state, diff, assessment_policy.mode)
+        # Sync plan: issue sync (if new issues) + workflow items (always).
+        _sync_plan_after_import(state, diff, assessment_policy.mode)
 
+    # In dry-run mode, state was never updated — use working_state for display.
+    display_state = state if not dry_run else working_state
     _print_import_results(
-        state=state,
+        state=display_state,
         lang_name=lang.name,
         config=import_config.config,
         diff=diff,

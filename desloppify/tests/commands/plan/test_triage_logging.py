@@ -6,7 +6,7 @@ import argparse
 
 import desloppify.app.commands.plan.triage_handlers as triage_mod
 from desloppify.engine._plan.schema import empty_plan
-from desloppify.engine._plan.stale_dimensions import TRIAGE_STAGE_IDS
+from desloppify.engine._plan.constants import TRIAGE_STAGE_IDS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +36,7 @@ def _plan_with_stages(*stage_names: str, confirmed: bool = False) -> dict:
         stages[name] = {
             "stage": name,
             "report": f"A sufficiently long report for {name} stage that meets minimum length requirements and more text",
-            "cited_ids": [],
+            "cited_ids": ["r1", "r2", "r3"],
             "timestamp": "2025-06-01T00:00:00Z",
             "issue_count": 5,
         }
@@ -141,7 +141,7 @@ class TestReflectLogging:
 
 class TestCompleteLogging:
     def test_complete_logs_entry(self, monkeypatch, capsys):
-        plan = _plan_with_stages("observe", "reflect", "organize", confirmed=True)
+        plan = _plan_with_stages("observe", "reflect", "organize", "enrich", "sense-check", confirmed=True)
         plan["clusters"]["fix-names"] = {
             "name": "fix-names",
             "description": "Fix naming",

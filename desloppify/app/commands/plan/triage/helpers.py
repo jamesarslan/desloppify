@@ -9,6 +9,9 @@ from desloppify.base.output.terminal import colorize
 from desloppify.engine.plan import (
     TRIAGE_IDS,
     TRIAGE_STAGE_IDS,
+    WORKFLOW_CREATE_PLAN_ID,
+    WORKFLOW_SCORE_CHECKPOINT_ID,
+    open_review_ids,
     purge_ids,
     review_issue_snapshot_hash,
 )
@@ -16,7 +19,7 @@ from desloppify.state import utc_now
 
 from .services import TriageServices, default_triage_services
 
-_STAGE_ORDER = ["observe", "reflect", "organize"]
+_STAGE_ORDER = ["observe", "reflect", "organize", "enrich", "sense-check"]
 
 
 def has_triage_in_queue(plan: dict) -> bool:
@@ -24,21 +27,22 @@ def has_triage_in_queue(plan: dict) -> bool:
     order = set(plan.get("queue_order", []))
     return bool(order & TRIAGE_IDS)
 
+
+def _clear_triage_stage_skips(plan: dict) -> None:
+    """Remove triage stage IDs from ``plan['skipped']``."""
+    skipped = plan.get("skipped")
+    if not isinstance(skipped, dict):
+        return
+    for sid in TRIAGE_STAGE_IDS:
+        skipped.pop(sid, None)
+
+
 def inject_triage_stages(plan: dict) -> None:
-    """Inject all 4 triage stage IDs into the queue (fresh start)."""
+    """Inject all triage stage IDs into the queue (fresh start)."""
     order: list[str] = plan.setdefault("queue_order", [])
-    existing = set(order)
-    for sid in TRIAGE_STAGE_IDS:
-        if sid not in existing:
-            order.insert(0 if sid == TRIAGE_STAGE_IDS[0] else len(order), sid)
-    # Re-insert in correct order at front
-    for sid in reversed(TRIAGE_STAGE_IDS):
-        if sid in order:
-            order.remove(sid)
-    insert_at = 0
-    for sid in TRIAGE_STAGE_IDS:
-        order.insert(insert_at, sid)
-        insert_at += 1
+    _clear_triage_stage_skips(plan)
+    remaining = [issue_id for issue_id in order if issue_id not in TRIAGE_IDS]
+    order[:] = [*TRIAGE_STAGE_IDS, *remaining]
 
 def purge_triage_stage(plan: dict, stage_name: str) -> None:
     """Purge a single triage stage ID from the queue."""
@@ -84,12 +88,55 @@ def observe_dimension_breakdown(si) -> tuple[dict[str, int], list[str]]:
     dim_names = sorted(by_dim, key=lambda d: (-by_dim[d], d))
     return dict(by_dim), dim_names
 
+def group_issues_into_observe_batches(
+    si,
+    max_batches: int = 5,
+) -> list[tuple[list[str], dict[str, dict]]]:
+    """Group issues by dimension into batches for parallel observe.
+
+    Returns list of (dimension_names, issues_subset) tuples.
+    Single batch if only one dimension exists.
+    """
+    by_dim, dim_names = observe_dimension_breakdown(si)
+
+    if len(dim_names) <= 1:
+        return [(dim_names, dict(si.open_issues))]
+
+    # Distribute dimensions into balanced batches by issue count
+    num_batches = min(max_batches, len(dim_names))
+    batch_dims: list[list[str]] = [[] for _ in range(num_batches)]
+    batch_counts: list[int] = [0] * num_batches
+
+    # Greedy: assign each dimension (largest first) to the lightest batch
+    for dim in dim_names:
+        lightest = min(range(num_batches), key=lambda i: batch_counts[i])
+        batch_dims[lightest].append(dim)
+        batch_counts[lightest] += by_dim[dim]
+
+    # Build issue subsets per batch
+    # Pre-index issues by dimension
+    dim_to_issues: dict[str, dict[str, dict]] = defaultdict(dict)
+    for fid, f in si.open_issues.items():
+        detail = f.get("detail", {}) if isinstance(f.get("detail"), dict) else {}
+        dim = detail.get("dimension", "unknown")
+        dim_to_issues[dim][fid] = f
+
+    result: list[tuple[list[str], dict[str, dict]]] = []
+    for dims in batch_dims:
+        if not dims:
+            continue
+        subset: dict[str, dict] = {}
+        for dim in dims:
+            subset.update(dim_to_issues.get(dim, {}))
+        if subset:
+            result.append((dims, subset))
+
+    return result
+
+
 def open_review_ids_from_state(state: dict) -> set[str]:
-    """Return IDs of all open review/concerns issues in state."""
-    return {
-        fid for fid, f in state.get("issues", {}).items()
-        if f.get("status") == "open" and f.get("detector") in ("review", "concerns")
-    }
+    """Return IDs of open review/concerns issues (excludes subjective_review placeholders)."""
+    return open_review_ids(state)
 
 def triage_coverage(
     plan: dict,
@@ -128,7 +175,7 @@ def apply_completion(
     *,
     services: TriageServices | None = None,
 ) -> None:
-    """Shared completion logic: update meta, remove triage::pending, save."""
+    """Shared completion logic: update meta, remove triage stage IDs, save."""
     resolved_services = services or default_triage_services()
     runtime = resolved_services.command_runtime(args)
     state = runtime.state
@@ -137,17 +184,18 @@ def apply_completion(
         plan, open_review_ids=open_review_ids_from_state(state),
     )
 
-    # Purge all triage stage IDs.
-    purge_ids(plan, list(TRIAGE_IDS))
+    # Purge all triage stage IDs and stale workflow items that point to triage.
+    purge_ids(plan, [
+        *TRIAGE_IDS,
+        WORKFLOW_SCORE_CHECKPOINT_ID,
+        WORKFLOW_CREATE_PLAN_ID,
+    ])
 
     current_hash = review_issue_snapshot_hash(state)
 
     meta = plan.setdefault("epic_triage_meta", {})
     meta["issue_snapshot_hash"] = current_hash
-    open_ids = sorted(
-        fid for fid, f in state.get("issues", {}).items()
-        if f.get("status") == "open" and f.get("detector") in ("review", "concerns")
-    )
+    open_ids = sorted(open_review_ids(state))
     meta["triaged_ids"] = open_ids
     if strategy.strip().lower() != "same":
         meta["strategy_summary"] = strategy
@@ -162,6 +210,7 @@ def apply_completion(
             "strategy": strategy if strategy.strip().lower() != "same" else meta.get("strategy_summary", ""),
         }
     meta["triage_stages"] = {}  # clear stages on completion
+    meta.pop("triage_recommended", None)
     meta.pop("stage_refresh_required", None)
     meta.pop("stage_snapshot_hash", None)
 
@@ -194,6 +243,7 @@ __all__ = [
     "cascade_clear_later_confirmations",
     "count_log_activity_since",
     "find_cluster_for",
+    "group_issues_into_observe_batches",
     "has_triage_in_queue",
     "inject_triage_stages",
     "manual_clusters_with_issues",

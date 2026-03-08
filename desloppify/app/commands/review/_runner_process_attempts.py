@@ -20,6 +20,7 @@ from ._runner_process_io import (
     _terminate_process,
     _write_live_snapshot,
 )
+from ._runner_process_attempt_success import handle_successful_attempt_core
 from ._runner_process_types import (
     CodexBatchRunnerDeps,
     _AttemptContext,
@@ -37,7 +38,6 @@ def _run_via_popen(
     interval: float,
     stall_seconds: int,
 ) -> _ExecutionResult:
-    """Execute batch via Popen with live streaming and stall recovery."""
     writer_thread = _start_live_writer(state, ctx, interval)
     try:
         process = deps.subprocess_popen(
@@ -140,7 +140,6 @@ def _run_via_subprocess(
     ctx: _AttemptContext,
     interval: float,
 ) -> _ExecutionResult:
-    """Execute batch via subprocess.run."""
     writer_thread = _start_live_writer(state, ctx, interval)
     try:
         result = deps.subprocess_run(
@@ -149,14 +148,10 @@ def _run_via_subprocess(
             text=True,
             timeout=deps.timeout_seconds,
         )
-    except deps.timeout_error as exc:
+    except deps.timeout_error:
         state.stop_event.set()
         writer_thread.join(timeout=2)
-        ctx.log_sections.append(
-            f"{ctx.header}\n\nTIMEOUT after {deps.timeout_seconds}s\n{exc}\n"
-        )
-        ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
-        return _ExecutionResult(code=124, stdout_text="", stderr_text="", early_return=124)
+        return _ExecutionResult(code=124, stdout_text="", stderr_text="", timed_out=True)
     except OSError as exc:
         state.stop_event.set()
         writer_thread.join(timeout=2)
@@ -178,8 +173,6 @@ def _run_via_subprocess(
         stdout_text=result.stdout or "",
         stderr_text=result.stderr or "",
     )
-
-
 def _resolve_retry_config(deps: CodexBatchRunnerDeps) -> _RetryConfig:
     retries_raw = deps.max_retries if isinstance(deps.max_retries, int) else 0
     max_retries = max(0, retries_raw)
@@ -212,8 +205,6 @@ def _resolve_retry_config(deps: CodexBatchRunnerDeps) -> _RetryConfig:
         stall_seconds=stall_seconds,
         use_popen=use_popen,
     )
-
-
 def _run_batch_attempt(
     *,
     cmd: list[str],
@@ -252,12 +243,8 @@ def _run_batch_attempt(
     else:
         result = _run_via_subprocess(cmd, deps, state, ctx, live_log_interval)
     return header, result
-
-
 def _handle_early_attempt_return(result: _ExecutionResult) -> int | None:
     return result.early_return
-
-
 def _handle_timeout_or_stall(
     *,
     header: str,
@@ -294,8 +281,6 @@ def _handle_timeout_or_stall(
         return 0
     deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
     return 124
-
-
 def _handle_successful_attempt(
     *,
     result: _ExecutionResult,
@@ -304,19 +289,15 @@ def _handle_successful_attempt(
     deps: CodexBatchRunnerDeps,
     log_sections: list[str],
 ) -> int | None:
-    if result.code != 0:
-        return None
-    if not _output_file_has_json_payload(output_file):
-        log_sections.append(
-            "Runner exited 0 but output file is missing or invalid; "
-            "treating as execution failure."
-        )
-        deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-        return 1
-    deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-    return 0
-
-
+    return handle_successful_attempt_core(
+        result=result,
+        output_file=output_file,
+        log_file=log_file,
+        deps=deps,
+        log_sections=log_sections,
+        default_validate_fn=_output_file_has_json_payload,
+        monotonic_fn=time.monotonic,
+    )
 def _handle_failed_attempt(
     *,
     result: _ExecutionResult,

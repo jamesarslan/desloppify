@@ -3,45 +3,47 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
+from desloppify.app.commands.helpers.queue_progress import (
+    format_queue_headline,
+    plan_aware_queue_breakdown,
+)
 from desloppify.app.commands.helpers.rendering import print_agent_plan
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.helpers.state import require_completed_scan
 from desloppify.app.commands.plan.cluster_handlers import cmd_cluster_dispatch
 from desloppify.app.commands.plan.commit_log_handlers import cmd_commit_log_dispatch
-from desloppify.app.commands.plan.override_handlers import (
+from desloppify.app.commands.plan.override_misc import (
     cmd_plan_describe,
     cmd_plan_focus,
     cmd_plan_note,
     cmd_plan_reopen,
-    cmd_plan_resolve,
     cmd_plan_scan_gate,
-    cmd_plan_skip,
-    cmd_plan_unskip,
 )
+from desloppify.app.commands.plan.override_resolve_cmd import cmd_plan_resolve
+from desloppify.app.commands.plan.override_skip import cmd_plan_skip, cmd_plan_unskip
 from desloppify.app.commands.plan.queue_render import cmd_plan_queue
 from desloppify.app.commands.plan.reorder_handlers import cmd_plan_reorder
 from desloppify.app.commands.plan.triage_handlers import cmd_plan_triage
 from desloppify.base.config import load_config
 from desloppify.base.discovery.file_paths import safe_write_text
+from desloppify.base.exception_sets import PLAN_LOAD_EXCEPTIONS
 from desloppify.base.output.fallbacks import warn_best_effort
 from desloppify.base.output.terminal import colorize
 from desloppify.base.tooling import check_config_staleness
 from desloppify.engine import planning as planning_mod
-from desloppify.app.commands.helpers.queue_progress import (
-    format_queue_headline,
-    plan_aware_queue_breakdown,
-)
-from desloppify.base.exception_sets import PLAN_LOAD_EXCEPTIONS
-from desloppify.engine._plan.annotations import annotation_counts
-from desloppify.engine._plan.skip_policy import USER_SKIP_KINDS
 from desloppify.engine.plan import (
+    USER_SKIP_KINDS,
+    annotation_counts,
     append_log_entry,
     commit_tracking_summary,
     load_plan,
     reset_plan,
     save_plan,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def cmd_plan_output(args: argparse.Namespace) -> None:
@@ -106,7 +108,8 @@ def _cmd_plan_show(args: argparse.Namespace) -> None:
     try:
         breakdown = plan_aware_queue_breakdown(runtime.state, plan)
         queue_line = format_queue_headline(breakdown)
-    except PLAN_LOAD_EXCEPTIONS:
+    except PLAN_LOAD_EXCEPTIONS as exc:
+        logger.debug("Plan show fell back to raw queue counts.", exc_info=exc)
         # Fallback to raw plan data if queue build fails
         ordered = len(plan.get("queue_order", []))
         queue_line = f"Queue: {ordered} items prioritized"

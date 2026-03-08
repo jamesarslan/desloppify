@@ -12,7 +12,7 @@ import desloppify.app.commands.next.output as next_output
 import desloppify.app.commands.next.render_support as next_render_support
 import desloppify.app.commands.plan.cmd as plan_cmd_mod
 import desloppify.app.commands.registry as cmd_registry
-import desloppify.app.commands.review.batch.core as review_batch_core
+from desloppify.app.commands.review.batch import merge as review_batch_merge
 import desloppify.app.commands.review.batch.execution as review_batches
 import desloppify.app.commands.review.importing.cmd as review_import
 import desloppify.app.commands.review.importing.helpers as review_import_helpers
@@ -70,7 +70,7 @@ import desloppify.languages.python.extractors_classes as py_extractors_classes
 import desloppify.languages.python.extractors_shared as py_extractors_shared
 import desloppify.languages.python.phases as py_phases
 import desloppify.languages.python.phases_quality as py_phases_quality
-import desloppify.languages.typescript.detectors._smell_detectors as ts_smell_detectors
+import desloppify.languages.typescript.detectors._smell_detectors_safety as ts_smell_detectors_safety
 import desloppify.languages.typescript.detectors.deps_runtime as ts_deps_runtime
 import desloppify.languages.typescript.extractors_components as ts_extractors_components
 from desloppify.intelligence.review import prepare_batches as review_prepare_batches
@@ -121,7 +121,7 @@ def test_smoke_commands():
         next_output.serialize_item,
         next_output.build_query_payload,
         next_render_support.render_queue_header,
-        review_batch_core.merge_batch_results,
+        review_batch_merge.merge_batch_results,
         review_batches.do_run_batches,
         review_import.do_import,
         review_import_helpers.load_import_issues_data,
@@ -177,7 +177,7 @@ def test_smoke_engine():
         py_extractors_shared.extract_py_params,
         py_phases_quality.phase_smells,
         py_phases_quality.phase_dict_keys,
-        ts_smell_detectors._detect_swallowed_errors,
+        ts_smell_detectors_safety._detect_swallowed_errors,
         ts_deps_runtime.build_dynamic_import_targets,
         ts_extractors_components.extract_ts_components,
     )

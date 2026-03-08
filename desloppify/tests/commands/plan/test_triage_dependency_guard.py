@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import argparse
 
-import desloppify.app.commands.plan.override_handlers as override_mod
-from desloppify.app.commands.plan.override_handlers import _blocked_triage_stages
+import desloppify.app.commands.plan.override_resolve_cmd as override_mod
+from desloppify.app.commands.plan.override_resolve_helpers import blocked_triage_stages as _blocked_triage_stages
 from desloppify.engine._plan.schema import empty_plan
-from desloppify.engine._plan.stale_dimensions import TRIAGE_STAGE_IDS
+from desloppify.engine._plan.constants import TRIAGE_STAGE_IDS
 
 
 def _plan_with_triage_stages(*confirmed_stages: str) -> dict:
@@ -51,7 +51,9 @@ class TestBlockedTriageStages:
         assert "triage::observe" not in blocked
         assert blocked["triage::reflect"] == ["triage::observe"]
         assert blocked["triage::organize"] == ["triage::reflect"]
-        assert blocked["triage::commit"] == ["triage::organize"]
+        assert blocked["triage::enrich"] == ["triage::organize"]
+        assert blocked["triage::sense-check"] == ["triage::enrich"]
+        assert blocked["triage::commit"] == ["triage::sense-check"]
 
     def test_observe_confirmed_unblocks_reflect(self):
         plan = _plan_with_triage_stages("observe")
@@ -61,7 +63,7 @@ class TestBlockedTriageStages:
         assert blocked["triage::organize"] == ["triage::reflect"]
 
     def test_all_confirmed_returns_empty(self):
-        plan = _plan_with_triage_stages("observe", "reflect", "organize", "commit")
+        plan = _plan_with_triage_stages("observe", "reflect", "organize", "enrich", "sense-check", "commit")
         assert _blocked_triage_stages(plan) == {}
 
     def test_no_triage_in_queue_returns_empty(self):

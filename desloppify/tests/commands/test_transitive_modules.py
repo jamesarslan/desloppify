@@ -451,7 +451,7 @@ class TestCmdReviewEntrypoint:
     def test_prepare_path(self, mock_runtime, mock_resolve_lang, mock_do_prepare):
         """When no import_file and no run_batches, falls through to do_prepare."""
         rt = MagicMock()
-        rt.state = {"issues": {}}
+        rt.state = {"issues": {}, "last_scan": "2024-01-01T00:00:00"}
         rt.state_path = "/tmp/state.json"
         rt.config = {}
         mock_runtime.return_value = rt
@@ -525,7 +525,7 @@ class TestCmdReviewEntrypoint:
     def test_run_batches_path(self, mock_runtime, mock_resolve_lang, mock_do_run_batches):
         """When run_batches is set, calls do_run_batches."""
         rt = MagicMock()
-        rt.state = {"issues": {}}
+        rt.state = {"issues": {}, "last_scan": "2024-01-01T00:00:00"}
         rt.state_path = "/tmp/state.json"
         rt.config = {}
         mock_runtime.return_value = rt
@@ -863,11 +863,11 @@ class TestUpdateInstalledSkill:
     @patch("desloppify.app.commands.update_skill.colorize", side_effect=lambda t, _c: t)
     @patch("desloppify.app.commands.update_skill._download")
     def test_successful_shared_install(self, mock_download, _mock_colorize, capsys, tmp_path):
-        """Non-dedicated install (e.g. codex) replaces section in existing file."""
+        """Non-dedicated install (e.g. windsurf) replaces section in existing file."""
         skill_content = "# Skill\n<!-- desloppify-skill-version: 1 -->\nContent"
         mock_download.side_effect = lambda f: {
             "SKILL.md": skill_content,
-            "CODEX.md": "codex overlay",
+            "WINDSURF.md": "windsurf overlay",
         }[f]
 
         # Pre-create the target file with some existing content
@@ -878,7 +878,7 @@ class TestUpdateInstalledSkill:
             "desloppify.app.commands.update_skill.get_project_root",
             return_value=tmp_path,
         ):
-            result = update_installed_skill("codex")
+            result = update_installed_skill("windsurf")
 
         assert result is True
         written = agents_file.read_text()

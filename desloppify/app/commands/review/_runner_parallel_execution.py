@@ -16,6 +16,7 @@ from ._runner_parallel_progress import (
     _record_execution_error,
     _record_progress_error,
 )
+from ._runner_parallel_serial import execute_serial_tasks
 from ._runner_parallel_types import BatchTask
 
 logger = logging.getLogger(__name__)
@@ -30,53 +31,17 @@ def _execute_serial(
     clock_fn,
     contract_cache: dict[int, str],
 ) -> list[int]:
-    """Run tasks one at a time — no threads, no closures."""
-    failures: set[int] = set()
-    for idx in indexes:
-        t0 = float(clock_fn())
-        start_error = _emit_progress(
-            progress_fn,
-            idx,
-            "start",
-            None,
-            details={"max_workers": 1},
-            contract_cache=contract_cache,
-        )
-        if start_error is not None:
-            _record_execution_error(
-                error_log_fn=error_log_fn,
-                failures=failures,
-                idx=idx,
-                exc=start_error,
-            )
-        try:
-            code = tasks[idx]()
-        except _RUNNER_TASK_EXCEPTIONS as exc:
-            _record_execution_error(
-                error_log_fn=error_log_fn,
-                failures=failures,
-                idx=idx,
-                exc=exc,
-            )
-            code = 1
-        if code != 0:
-            failures.add(idx)
-        done_error = _emit_progress(
-            progress_fn,
-            idx,
-            "done",
-            code,
-            details={"elapsed_seconds": int(max(0.0, clock_fn() - t0))},
-            contract_cache=contract_cache,
-        )
-        if done_error is not None:
-            _record_execution_error(
-                error_log_fn=error_log_fn,
-                failures=failures,
-                idx=idx,
-                exc=done_error,
-            )
-    return sorted(failures)
+    return execute_serial_tasks(
+        tasks=tasks,
+        indexes=indexes,
+        progress_fn=progress_fn,
+        error_log_fn=error_log_fn,
+        clock_fn=clock_fn,
+        contract_cache=contract_cache,
+        emit_progress_fn=_emit_progress,
+        record_execution_error_fn=_record_execution_error,
+        runner_task_exceptions=_RUNNER_TASK_EXCEPTIONS,
+    )
 
 
 def _resolve_parallel_runtime(
