@@ -58,6 +58,7 @@ def generic_lang(
     treesitter_spec=None,
     zone_rules: list[ZoneRule] | None = None,
     test_coverage_module: Any | None = None,
+    entry_patterns: list[str] | None = None,
 ) -> LangConfig:
     """Build and register a generic language plugin from tool specs.
 
@@ -81,6 +82,7 @@ def generic_lang(
         treesitter_spec=treesitter_spec,
         zone_rules=zone_rules,
         test_coverage_module=test_coverage_module,
+        entry_patterns=entry_patterns,
     )
 
     from desloppify.languages import register_generic_lang
@@ -105,7 +107,7 @@ def generic_lang(
         exclusions=opts.exclude or [],
         default_src=opts.default_src,
         build_dep_graph=dep_graph_fn,
-        entry_patterns=[],
+        entry_patterns=opts.entry_patterns or [],
         barrel_names=set(),
         phases=phases,
         fixers=fixers,

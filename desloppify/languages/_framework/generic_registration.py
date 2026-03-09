@@ -38,6 +38,7 @@ class GenericLangOptions:
     treesitter_spec: Any | None = None
     zone_rules: list[ZoneRule] | None = None
     test_coverage_module: Any | None = None
+    entry_patterns: list[str] | None = None
 
 
 def _register_generic_tool_specs(tool_specs: list[dict[str, Any]]) -> dict[str, FixerConfig]:

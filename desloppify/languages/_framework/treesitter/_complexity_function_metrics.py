@@ -64,6 +64,7 @@ _BRANCHING_NODE_TYPES = frozenset(
         "loop_expression",
         "case_clause",
         "match_arm",
+        "match_conditional_expression",
         "catch_clause",
         "rescue",
         "except_clause",

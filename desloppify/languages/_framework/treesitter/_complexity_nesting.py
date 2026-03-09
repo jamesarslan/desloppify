@@ -146,6 +146,8 @@ _CLOSURE_NODE_TYPES = frozenset(
         "anonymous_function",
         "block_argument",
         "func_literal",
+        # PHP anonymous functions (``function() { ... }``)
+        "anonymous_function_creation_expression",
     }
 )
 

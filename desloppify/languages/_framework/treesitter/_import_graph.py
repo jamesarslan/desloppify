@@ -59,6 +59,17 @@ def ts_build_dep_graph(
             # Strip surrounding quotes if present.
             import_text = import_text.strip("\"'`")
 
+            # Prepend group-use prefix when present (PHP ``use A\B\{C, D}``).
+            prefix_node = _unwrap_node(captures.get("prefix"))
+            if prefix_node is not None:
+                prefix_raw = prefix_node.text
+                prefix_text = (
+                    prefix_raw.decode("utf-8", errors="replace")
+                    if isinstance(prefix_raw, bytes)
+                    else str(prefix_raw)
+                ).strip("\"'`")
+                import_text = f"{prefix_text}\\{import_text}"
+
             resolved = spec.resolve_import(import_text, filepath, scan_path)
             if resolved is None:
                 continue
