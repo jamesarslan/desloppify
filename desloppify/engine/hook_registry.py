@@ -30,6 +30,16 @@ def register_lang_hooks(
         hooks["test_coverage"] = test_coverage
 
 
+def _bootstrap_language_module(module: object) -> None:
+    """Run optional language-module bootstrap hook."""
+    register_fn = getattr(module, "register", None)
+    if register_fn is None:
+        return
+    if not callable(register_fn):
+        raise TypeError("Language module register entrypoint must be callable")
+    register_fn()
+
+
 def get_lang_hook(lang_name: str | None, hook_name: str) -> object | None:
     """Get a previously-registered language hook module."""
     if not lang_name:
@@ -45,7 +55,8 @@ def get_lang_hook(lang_name: str | None, hook_name: str) -> object | None:
     # Lazy-load only the requested language package.
     if module is None:
         try:
-            importlib.import_module(module_name)
+            module = importlib.import_module(module_name)
+            _bootstrap_language_module(module)
         except (ImportError, ValueError, TypeError, RuntimeError, OSError) as exc:
             logger.debug(
                 "Unable to import language hook package %s: %s", lang_name, exc
@@ -53,7 +64,8 @@ def get_lang_hook(lang_name: str | None, hook_name: str) -> object | None:
             return None
     elif lang_name not in _STATE.hooks:
         try:
-            importlib.reload(module)
+            module = importlib.reload(module)
+            _bootstrap_language_module(module)
         except (ImportError, ValueError, TypeError, RuntimeError, OSError) as exc:
             logger.debug(
                 "Unable to reload language hook package %s: %s", lang_name, exc

@@ -6,6 +6,7 @@ from desloppify.base.discovery.source import find_py_files
 from desloppify.engine.hook_registry import register_lang_hooks
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
 from desloppify.languages import register_lang
+from desloppify.languages._framework import registry_state
 from desloppify.languages._framework.base.phase_builders import (
     detector_phase_security,
     detector_phase_signature,
@@ -58,10 +59,7 @@ from desloppify.languages.python.phases import (
     phase_unused_enums,
 )
 
-register_lang_hooks("python", test_coverage=py_test_coverage_hooks)
 
-
-@register_lang("python")
 class PythonConfig(LangConfig):
     def _missing_bandit_coverage(self) -> DetectorCoverageStatus:
         return missing_bandit_coverage()
@@ -125,6 +123,14 @@ class PythonConfig(LangConfig):
         )
 
 
+def register() -> None:
+    """Register Python language config + hooks through an explicit entrypoint."""
+    register_lang_hooks("python", test_coverage=py_test_coverage_hooks)
+    if registry_state.is_registered("python"):
+        return
+    register_lang("python")(PythonConfig)
+
+
 __all__ = [
     "COMMON_ZONE_RULES",
     "PY_COMPLEXITY_SIGNALS",
@@ -138,6 +144,7 @@ __all__ = [
     "PY_SKIP_NAMES",
     "PY_ZONE_RULES",
     "PythonConfig",
+    "register",
     "Zone",
     "ZoneRule",
 ]
