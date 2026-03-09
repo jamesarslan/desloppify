@@ -31,9 +31,20 @@ def _execute_serial(
     clock_fn,
     contract_cache: dict[int, str],
 ) -> list[int]:
+    normalized_indexes: list[int] = []
+    seen: set[int] = set()
+    for idx in indexes:
+        if idx in seen:
+            continue
+        seen.add(idx)
+        if idx not in tasks:
+            continue
+        normalized_indexes.append(idx)
+    if not normalized_indexes:
+        return []
     return execute_serial_tasks(
         tasks=tasks,
-        indexes=indexes,
+        indexes=normalized_indexes,
         progress_fn=progress_fn,
         error_log_fn=error_log_fn,
         clock_fn=clock_fn,

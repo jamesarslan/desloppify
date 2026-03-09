@@ -35,10 +35,25 @@ def run_triage_stage(
     validate_output_fn: Callable[[Path], bool] | None = None,
 ) -> int:
     """Execute a triage stage via codex subprocess. Returns exit code."""
+    normalized_prompt = str(prompt).strip()
+    if not normalized_prompt:
+        safe_write_text(log_file, "Empty triage prompt — skipping execution.\n")
+        return 2
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     if validate_output_fn is None:
         validate_output_fn = _output_file_has_text
+    timeout = timeout_seconds if timeout_seconds > 0 else 1800
+    preview = " ".join(
+        codex_batch_command(
+            prompt=normalized_prompt,
+            repo_root=repo_root,
+            output_file=output_file,
+        )
+    )
+    safe_write_text(log_file, f"RUNNER COMMAND PREVIEW:\n{preview}\n")
     deps = CodexBatchRunnerDeps(
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=timeout,
         subprocess_run=subprocess.run,
         timeout_error=subprocess.TimeoutExpired,
         safe_write_text_fn=safe_write_text,
@@ -52,7 +67,7 @@ def run_triage_stage(
         validate_output_fn=validate_output_fn,
     )
     return run_codex_batch(
-        prompt=prompt,
+        prompt=normalized_prompt,
         repo_root=repo_root,
         output_file=output_file,
         log_file=log_file,
