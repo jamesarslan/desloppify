@@ -916,9 +916,8 @@ class TestCompleteParallelFuture:
         assert len(errors_logged) == 1
         assert errors_logged[0][0] == 7
 
-    def test_progress_failure_marks_as_failure(self):
-        """If a prior progress callback failed for this idx, it's marked as failure
-        even when the task itself returns code=0."""
+    def test_progress_failure_does_not_mark_as_failure(self):
+        """Prior progress callback failures are logged but don't fail successful tasks."""
         future = self._make_future(result=0)
         futures = {future: 2}
         failures: set[int] = set()
@@ -938,7 +937,7 @@ class TestCompleteParallelFuture:
             lock=lock,
             clock_fn=lambda: 110.0,
         )
-        assert 2 in failures
+        assert 2 not in failures
 
     def test_missing_started_at_uses_clock(self):
         """If idx not in started_at, falls back to clock_fn for elapsed calc."""

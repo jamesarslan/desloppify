@@ -2018,7 +2018,7 @@ class TestCmdReviewPrepare:
             error_log_fn=lambda idx, exc: captured.append((idx, str(exc))),
         )
 
-        assert failures == [0]
+        assert failures == []
         assert any("progress callback failed" in msg for _idx, msg in captured)
 
     def test_execute_batches_does_not_mask_internal_progress_typeerror(self):
@@ -2035,7 +2035,7 @@ class TestCmdReviewPrepare:
             error_log_fn=lambda idx, exc: captured.append((idx, str(exc))),
         )
 
-        assert failures == [0]
+        assert failures == []
         assert any("internal progress bug" in msg for _idx, msg in captured)
 
     def test_execute_batches_heartbeat_error_log_failure_is_nonfatal(self):

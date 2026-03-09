@@ -38,6 +38,7 @@ def execute_serial_tasks(
                 idx=idx,
                 exc=start_error,
             )
+            failures.discard(idx)
         try:
             code = tasks[idx]()
         except runner_task_exceptions as exc:
@@ -65,6 +66,7 @@ def execute_serial_tasks(
                 idx=idx,
                 exc=done_error,
             )
+            failures.discard(idx)
     return sorted(failures)
 
 
