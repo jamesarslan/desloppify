@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 
-def transitive_coverage_core(
+def transitive_coverage(
     directly_tested: set[str],
     graph: dict,
     production_files: set[str],
@@ -31,7 +31,7 @@ def transitive_coverage_core(
     return visited - directly_tested
 
 
-def analyze_test_quality_core(
+def analyze_test_quality(
     test_files: set[str],
     lang_name: str,
     *,
@@ -159,7 +159,7 @@ def _build_prod_by_module(
     return prod_by_module
 
 
-def get_test_files_for_prod_core(
+def get_test_files_for_prod(
     prod_file: str,
     test_files: set[str],
     graph: dict,
@@ -204,7 +204,7 @@ def get_test_files_for_prod_core(
     return result
 
 
-def build_test_import_index_core(
+def build_test_import_index(
     test_files: set[str],
     production_files: set[str],
     lang_name: str,
@@ -228,9 +228,20 @@ def build_test_import_index_core(
     return index
 
 
+# Backward-compatible aliases for previous internal names.
+transitive_coverage_core = transitive_coverage
+analyze_test_quality_core = analyze_test_quality
+get_test_files_for_prod_core = get_test_files_for_prod
+build_test_import_index_core = build_test_import_index
+
+
 __all__ = [
+    "analyze_test_quality",
     "analyze_test_quality_core",
+    "build_test_import_index",
     "build_test_import_index_core",
+    "get_test_files_for_prod",
     "get_test_files_for_prod_core",
+    "transitive_coverage",
     "transitive_coverage_core",
 ]
