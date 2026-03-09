@@ -17,6 +17,7 @@ from desloppify.engine._work_queue.helpers import (
 from desloppify.engine._work_queue.synthetic_workflow import (
     build_communicate_score_item,
     build_create_plan_item,
+    build_deferred_disposition_item,
     build_import_scores_item,
     build_score_checkpoint_item,
 )

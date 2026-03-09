@@ -381,6 +381,67 @@ class TestWorkflowRunScanItem:
         run_scan_items = [i for i in result["items"] if i.get("id") == "workflow::run-scan"]
         assert len(run_scan_items) == 0
 
+    def test_deferred_disposition_precedes_run_scan_when_temporary_skips_exist(self):
+        """When only deferred temporary skips remain, queue surfaces disposition then scan."""
+        from desloppify.engine._work_queue.core import (
+            QueueBuildOptions,
+            build_work_queue,
+        )
+
+        state: dict = {
+            "issues": {
+                "f1": {
+                    "id": "f1", "detector": "unused", "status": "open",
+                    "file": "src/a.ts", "tier": 1, "confidence": "high",
+                    "summary": "test", "detail": {},
+                },
+            },
+            "scan_count": 5,
+        }
+        plan = {
+            "plan_start_scores": {"strict": 75.0},
+            "queue_order": [],
+            "skipped": {"f1": {"kind": "temporary"}},
+        }
+        result = build_work_queue(
+            state,
+            options=QueueBuildOptions(
+                status="open",
+                count=None,
+                plan=plan,
+            ),
+        )
+        ids = [item["id"] for item in result["items"]]
+        assert ids[:2] == ["workflow::deferred-disposition", "workflow::run-scan"]
+        deferred = result["items"][0]
+        assert deferred["kind"] == "workflow_action"
+        assert deferred["primary_command"] == 'desloppify plan unskip "*"'
+
+    def test_deferred_disposition_not_shown_for_permanent_skips(self):
+        """Permanent skips are decisions already; only run-scan should remain."""
+        from desloppify.engine._work_queue.core import (
+            QueueBuildOptions,
+            build_work_queue,
+        )
+
+        state: dict = {"issues": {}, "scan_count": 5}
+        plan = {
+            "plan_start_scores": {"strict": 75.0},
+            "queue_order": [],
+            "skipped": {"f1": {"kind": "permanent"}},
+        }
+        result = build_work_queue(
+            state,
+            options=QueueBuildOptions(
+                status="open",
+                count=None,
+                plan=plan,
+            ),
+        )
+        ids = [item["id"] for item in result["items"]]
+        assert "workflow::deferred-disposition" not in ids
+        assert ids == ["workflow::run-scan"]
+
     def test_run_scan_not_injected_without_plan_start_scores(self):
         """No workflow::run-scan when plan_start_scores is empty (no active cycle)."""
         from desloppify.engine._work_queue.core import (
@@ -403,6 +464,30 @@ class TestWorkflowRunScanItem:
             ),
         )
         assert result["total"] == 0
+
+    def test_deferred_disposition_injected_without_plan_start_scores(self):
+        """Deferred temporary skips should still surface even without score-cycle metadata."""
+        from desloppify.engine._work_queue.core import (
+            QueueBuildOptions,
+            build_work_queue,
+        )
+
+        state: dict = {"issues": {}, "scan_count": 5}
+        plan = {
+            "plan_start_scores": {},
+            "queue_order": [],
+            "skipped": {"f1": {"kind": "temporary"}},
+        }
+        result = build_work_queue(
+            state,
+            options=QueueBuildOptions(
+                status="open",
+                count=None,
+                plan=plan,
+            ),
+        )
+        assert result["total"] == 1
+        assert result["items"][0]["id"] == "workflow::deferred-disposition"
 
     def test_run_scan_not_injected_without_plan(self):
         """No workflow::run-scan when no plan is provided."""

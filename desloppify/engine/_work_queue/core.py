@@ -32,6 +32,7 @@ from desloppify.engine._work_queue.ranking import (
 from desloppify.engine._work_queue.synthetic import (
     build_communicate_score_item,
     build_create_plan_item,
+    build_deferred_disposition_item,
     build_import_scores_item,
     build_score_checkpoint_item,
     build_subjective_items,
@@ -266,13 +267,20 @@ def _plan_postsort(
 
 
 def _empty_queue_fallback(plan: dict | None) -> list[WorkQueueItem]:
-    """Return a 'run scan' nudge when an active plan cycle has cleared."""
+    """Return end-of-queue workflow actions when no active queue items remain."""
     if not plan:
         return []
+
+    items: list[WorkQueueItem] = []
+    deferred_item = build_deferred_disposition_item(plan)
+    if deferred_item is not None:
+        items.append(deferred_item)
+
     plan_scores = plan.get("plan_start_scores", {})
     if plan_scores.get("strict") is None:
-        return []
-    return [{
+        return items
+
+    items.append({
         "id": "workflow::run-scan",
         "kind": "workflow_action",
         "summary": "Queue cleared \u2014 run scan to finalize and reveal your updated score.",
@@ -280,7 +288,8 @@ def _empty_queue_fallback(plan: dict | None) -> list[WorkQueueItem]:
         "file": "",
         "detector": "workflow",
         "confidence": "high",
-    }]
+    })
+    return items
 
 
 __all__ = [

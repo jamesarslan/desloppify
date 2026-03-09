@@ -199,9 +199,74 @@ def build_communicate_score_item(plan: dict, state: dict) -> WorkQueueItem | Non
     }
 
 
+def _temporary_skipped_ids(plan: dict) -> list[str]:
+    skipped = plan.get("skipped", {})
+    if not isinstance(skipped, dict):
+        return []
+    deferred: list[str] = []
+    for issue_id, entry in skipped.items():
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("kind", "temporary")) == "temporary":
+            deferred.append(str(issue_id))
+    deferred.sort()
+    return deferred
+
+
+def build_deferred_disposition_item(plan: dict) -> WorkQueueItem | None:
+    """Build a synthetic item prompting deferred backlog disposition."""
+    from desloppify.engine._plan.constants import WORKFLOW_DEFERRED_DISPOSITION_ID
+
+    deferred_ids = _temporary_skipped_ids(plan)
+    if not deferred_ids:
+        return None
+
+    count = len(deferred_ids)
+    plural = "item" if count == 1 else "items"
+    reactivate_cmd = 'desloppify plan unskip "*"'
+    wontfix_cmd = (
+        'desloppify plan skip --permanent "*" '
+        '--note "<why this deferred work should stay wontfix>" '
+        '--attest "I have actually reviewed these deferred items and I am not gaming the score by skipping them permanently." '
+        "--confirm"
+    )
+
+    return {
+        "id": WORKFLOW_DEFERRED_DISPOSITION_ID,
+        "tier": 1,
+        "confidence": "high",
+        "detector": "workflow",
+        "file": ".",
+        "kind": "workflow_action",
+        "summary": (
+            f"Deferred backlog decision required: {count} temporary {plural} "
+            "must be reactivated or marked wontfix."
+        ),
+        "detail": {
+            "temporary_skipped_count": count,
+            "reactivate_command": reactivate_cmd,
+            "wontfix_command": wontfix_cmd,
+            "decision_options": [
+                {
+                    "label": "Reactivate deferred work",
+                    "command": reactivate_cmd,
+                },
+                {
+                    "label": "Convert deferred work to wontfix",
+                    "command": wontfix_cmd,
+                },
+            ],
+        },
+        "primary_command": reactivate_cmd,
+        "blocked_by": [],
+        "is_blocked": False,
+    }
+
+
 __all__ = [
     "build_communicate_score_item",
     "build_create_plan_item",
+    "build_deferred_disposition_item",
     "build_import_scores_item",
     "build_score_checkpoint_item",
 ]

@@ -92,3 +92,23 @@ def test_workflow_render_helpers(capsys) -> None:
     out = capsys.readouterr().out
     assert "Workflow step" in out
     assert "Blocked by: observe" in out
+
+
+def test_workflow_render_action_shows_decision_options(capsys) -> None:
+    workflow_render_mod.render_workflow_action(
+        {
+            "summary": "Deferred backlog",
+            "detail": {
+                "decision_options": [
+                    {"label": "Reactivate", "command": 'desloppify plan unskip "*"'},
+                    {"label": "Wontfix", "command": 'desloppify plan skip --permanent "*"'},
+                ]
+            },
+            "primary_command": 'desloppify plan unskip "*"',
+        },
+        colorize_fn=lambda text, _tone=None: text,
+    )
+    out = capsys.readouterr().out
+    assert "Decision options" in out
+    assert "Reactivate" in out
+    assert "Wontfix" in out

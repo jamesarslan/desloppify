@@ -40,6 +40,21 @@ def _render_workflow_action(item: dict, *, colorize_fn) -> None:
     print(colorize_fn("  (Workflow step)", "bold"))
     print(colorize_fn("  " + "─" * 60, "dim"))
     print(f"  {colorize_fn(item.get('summary', ''), 'yellow')}")
+    detail = item.get("detail", {})
+    options = detail.get("decision_options", []) if isinstance(detail, dict) else []
+    if isinstance(options, list) and options:
+        print(colorize_fn("\n  Decision options:", "dim"))
+        for idx, option in enumerate(options, 1):
+            if not isinstance(option, dict):
+                continue
+            label = str(option.get("label", "")).strip()
+            command = str(option.get("command", "")).strip()
+            if label and command:
+                print(colorize_fn(f"  {idx}. {label}: {command}", "dim"))
+            elif command:
+                print(colorize_fn(f"  {idx}. {command}", "dim"))
+            elif label:
+                print(colorize_fn(f"  {idx}. {label}", "dim"))
     print(colorize_fn(f"\n  Action: {item.get('primary_command', '')}", "cyan"))
 
 

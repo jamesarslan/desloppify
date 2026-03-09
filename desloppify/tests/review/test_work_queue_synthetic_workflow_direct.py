@@ -120,3 +120,32 @@ def test_build_communicate_score_item_formats_command_and_delta(monkeypatch) -> 
     assert item["summary"].endswith("80.0/100")
     assert item["detail"]["delta"] == 0.0
     assert WORKFLOW_COMMUNICATE_SCORE_ID in item["primary_command"]
+
+
+def test_build_deferred_disposition_item_returns_none_without_temporary_skips() -> None:
+    assert workflow_mod.build_deferred_disposition_item({"skipped": {}}) is None
+    assert workflow_mod.build_deferred_disposition_item(
+        {"skipped": {"i1": {"kind": "permanent"}}}
+    ) is None
+
+
+def test_build_deferred_disposition_item_with_temporary_skips() -> None:
+    from desloppify.engine._plan.constants import WORKFLOW_DEFERRED_DISPOSITION_ID
+
+    item = workflow_mod.build_deferred_disposition_item(
+        {
+            "skipped": {
+                "i1": {"kind": "temporary"},
+                "i2": {"kind": "temporary"},
+                "i3": {"kind": "permanent"},
+            }
+        }
+    )
+
+    assert item is not None
+    assert item["id"] == WORKFLOW_DEFERRED_DISPOSITION_ID
+    assert item["kind"] == "workflow_action"
+    assert "2 temporary items" in item["summary"]
+    assert item["primary_command"] == 'desloppify plan unskip "*"'
+    assert "decision_options" in item["detail"]
+    assert len(item["detail"]["decision_options"]) == 2
