@@ -6,250 +6,30 @@ import logging
 from collections.abc import Callable
 from functools import lru_cache
 
+from desloppify.base.subjective_dimensions_constants import (
+    DISPLAY_NAMES,
+    LEGACY_DISPLAY_NAMES as _LEGACY_DISPLAY_NAMES,
+    LEGACY_RESET_ON_SCAN_DIMENSIONS as _LEGACY_RESET_ON_SCAN_DIMENSIONS,
+    LEGACY_WEIGHT_BY_DIMENSION as _LEGACY_WEIGHT_BY_DIMENSION,
+    normalize_dimension_name as _normalize_dimension_name,
+    normalize_lang_name as _normalize_lang_name,
+    title_display_name as _title_display_name,
+)
+from desloppify.base.subjective_dimensions_merge import (
+    merge_dimension_meta as _merge_dimension_meta,
+)
+from desloppify.base.subjective_dimensions_providers import (
+    PROVIDER_STATE as _PROVIDER_STATE,
+    available_languages as _available_languages,
+    default_available_languages as _default_available_languages,
+    default_load_dimensions_payload as _default_load_dimensions_payload,
+    default_load_dimensions_payload_for_lang as _default_load_dimensions_payload_for_lang,
+    load_dimensions_payload as _load_dimensions_payload,
+    load_dimensions_payload_for_lang as _load_dimensions_payload_for_lang,
+)
 from desloppify.base.text_utils import is_numeric
-from desloppify.languages import available_langs as _available_langs
 
 logger = logging.getLogger(__name__)
-
-DISPLAY_NAMES: dict[str, str] = {
-    # Holistic dimensions
-    "cross_module_architecture": "Cross-module arch",
-    "initialization_coupling": "Init coupling",
-    "convention_outlier": "Convention drift",
-    "error_consistency": "Error consistency",
-    "abstraction_fitness": "Abstraction fit",
-    "dependency_health": "Dep health",
-    "test_strategy": "Test strategy",
-    "api_surface_coherence": "API coherence",
-    "authorization_consistency": "Auth consistency",
-    "ai_generated_debt": "AI generated debt",
-    "incomplete_migration": "Stale migration",
-    "package_organization": "Structure nav",
-    "high_level_elegance": "High elegance",
-    "mid_level_elegance": "Mid elegance",
-    "low_level_elegance": "Low elegance",
-    # Design coherence (concerns bridge)
-    "design_coherence": "Design coherence",
-    # Per-file review dimensions
-    "naming_quality": "Naming quality",
-    "logic_clarity": "Logic clarity",
-    "type_safety": "Type safety",
-    "contract_coherence": "Contracts",
-}
-
-_LEGACY_DISPLAY_NAMES: dict[str, str] = DISPLAY_NAMES
-
-_LEGACY_SUBJECTIVE_WEIGHTS_BY_DISPLAY: dict[str, float] = {
-    "high elegance": 22.0,
-    "mid elegance": 22.0,
-    "low elegance": 12.0,
-    "contracts": 12.0,
-    "type safety": 12.0,
-    "abstraction fit": 8.0,
-    "logic clarity": 6.0,
-    "structure nav": 5.0,
-    "error consistency": 3.0,
-    "naming quality": 2.0,
-    "ai generated debt": 1.0,
-    "design coherence": 10.0,
-}
-
-_LEGACY_RESET_ON_SCAN_DIMENSIONS: frozenset[str] = frozenset(
-    {
-        "naming_quality",
-        "error_consistency",
-        "abstraction_fitness",
-        "logic_clarity",
-        "ai_generated_debt",
-        "type_safety",
-        "contract_coherence",
-        "package_organization",
-        "high_level_elegance",
-        "mid_level_elegance",
-        "low_level_elegance",
-    }
-)
-
-_LEGACY_WEIGHT_BY_DIMENSION: dict[str, float] = {}
-for _dimension_key, _display_name in _LEGACY_DISPLAY_NAMES.items():
-    _weight = _LEGACY_SUBJECTIVE_WEIGHTS_BY_DISPLAY.get(
-        " ".join(_display_name.strip().lower().split())
-    )
-    if _weight is not None:
-        _LEGACY_WEIGHT_BY_DIMENSION[_dimension_key] = _weight
-
-
-def _normalize_dimension_name(name: str) -> str:
-    return "_".join(str(name).strip().lower().replace("-", "_").split())
-
-
-def _title_display_name(dimension_key: str) -> str:
-    return dimension_key.replace("_", " ").title()
-
-
-def _normalize_lang_name(lang_name: str | None) -> str | None:
-    if not isinstance(lang_name, str):
-        return None
-    cleaned = lang_name.strip().lower()
-    return cleaned or None
-
-
-def _extract_prompt_meta(entry: object) -> dict[str, object]:
-    """Extract optional metadata fields from a prompt payload entry."""
-    if not isinstance(entry, dict):
-        return {}
-    meta = entry.get("meta")
-    if not isinstance(meta, dict):
-        return {}
-
-    out: dict[str, object] = {}
-    display_name = meta.get("display_name")
-    if isinstance(display_name, str) and display_name.strip():
-        out["display_name"] = display_name.strip()
-
-    weight = meta.get("weight")
-    if is_numeric(weight):
-        out["weight"] = max(0.0, float(weight))
-
-    enabled = meta.get("enabled_by_default")
-    if isinstance(enabled, bool):
-        out["enabled_by_default"] = enabled
-
-    reset_on_scan = meta.get("reset_on_scan")
-    if isinstance(reset_on_scan, bool):
-        out["reset_on_scan"] = reset_on_scan
-
-    return out
-
-
-def _merge_prompt_display_and_weights(
-    payload: dict[str, object],
-    *,
-    prompt_meta: dict[str, object],
-    override_existing: bool,
-) -> None:
-    if "display_name" in prompt_meta and (
-        override_existing or "display_name" not in payload
-    ):
-        payload["display_name"] = prompt_meta["display_name"]
-    if "weight" in prompt_meta and (override_existing or "weight" not in payload):
-        payload["weight"] = prompt_meta["weight"]
-    if "reset_on_scan" in prompt_meta and (
-        override_existing or "reset_on_scan" not in payload
-    ):
-        payload["reset_on_scan"] = prompt_meta["reset_on_scan"]
-
-
-def _merge_enabled_by_default_flag(
-    payload: dict[str, object],
-    *,
-    prompt_meta: dict[str, object],
-    override_existing: bool,
-    default_enabled: bool,
-) -> None:
-    if default_enabled:
-        payload["enabled_by_default"] = True
-    if "enabled_by_default" not in prompt_meta:
-        return
-    prompt_enabled = bool(prompt_meta["enabled_by_default"])
-    if override_existing:
-        payload["enabled_by_default"] = prompt_enabled
-        return
-    payload["enabled_by_default"] = bool(
-        payload.get("enabled_by_default", False) or prompt_enabled
-    )
-
-
-def _normalized_default_dimensions(dimensions: list[str]) -> set[str]:
-    return {
-        _normalize_dimension_name(dim)
-        for dim in dimensions
-        if isinstance(dim, str) and dim.strip()
-    }
-
-
-def _merge_dimension_meta(
-    target: dict[str, dict[str, object]],
-    *,
-    dimensions: list[str],
-    prompts: dict[str, dict[str, object]],
-    override_existing: bool = False,
-) -> None:
-    defaults = _normalized_default_dimensions(dimensions)
-
-    for raw_dim, entry in prompts.items():
-        dim = _normalize_dimension_name(raw_dim)
-        if not dim:
-            continue
-
-        payload = target.setdefault(dim, {})
-        prompt_meta = _extract_prompt_meta(entry)
-        _merge_prompt_display_and_weights(
-            payload,
-            prompt_meta=prompt_meta,
-            override_existing=override_existing,
-        )
-        _merge_enabled_by_default_flag(
-            payload,
-            prompt_meta=prompt_meta,
-            override_existing=override_existing,
-            default_enabled=dim in defaults,
-        )
-
-
-def _default_available_languages() -> list[str]:
-    try:
-        return list(_available_langs())
-    except (ImportError, ValueError, TypeError, RuntimeError):
-        return []
-
-
-def _default_load_dimensions_payload() -> tuple[
-    list[str], dict[str, dict[str, object]], str
-]:
-    from desloppify.intelligence.review.dimensions.data import load_dimensions
-
-    return load_dimensions()
-
-
-def _default_load_dimensions_payload_for_lang(
-    lang_name: str,
-) -> tuple[list[str], dict[str, dict[str, object]], str]:
-    from desloppify.intelligence.review.dimensions.data import (
-        load_dimensions_for_lang,
-    )
-
-    return load_dimensions_for_lang(lang_name)
-
-
-class _SubjectiveProviderState:
-    def __init__(self) -> None:
-        self.available_languages_provider: Callable[[], list[str]] = (
-            _default_available_languages
-        )
-        self.load_dimensions_payload_provider: Callable[
-            [], tuple[list[str], dict[str, dict[str, object]], str]
-        ] = _default_load_dimensions_payload
-        self.load_dimensions_payload_for_lang_provider: Callable[
-            [str], tuple[list[str], dict[str, dict[str, object]], str]
-        ] = _default_load_dimensions_payload_for_lang
-
-
-_PROVIDER_STATE = _SubjectiveProviderState()
-
-
-def _available_languages() -> list[str]:
-    return _PROVIDER_STATE.available_languages_provider()
-
-
-def _load_dimensions_payload() -> tuple[list[str], dict[str, dict[str, object]], str]:
-    return _PROVIDER_STATE.load_dimensions_payload_provider()
-
-
-def _load_dimensions_payload_for_lang(
-    lang_name: str,
-) -> tuple[list[str], dict[str, dict[str, object]], str]:
-    return _PROVIDER_STATE.load_dimensions_payload_for_lang_provider(lang_name)
 
 
 def _clear_subjective_dimension_caches() -> None:
