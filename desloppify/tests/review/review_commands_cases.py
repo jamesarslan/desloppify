@@ -407,10 +407,7 @@ class TestCmdReviewPrepare:
                     "timestamp": "2026-03-10T10:00:00+00:00",
                     "import_file": str(tmp_path / "expected_scores.json"),
                     "normalized_import_file": str((tmp_path / "expected_scores.json").resolve()),
-                    "packet_path": str(tmp_path / "expected_packet.json"),
-                    "normalized_packet_path": str((tmp_path / "expected_packet.json").resolve()),
                     "packet_sha256": "expected-sha",
-                    "assessment_dimensions": ["naming_quality"],
                 }
             },
         }
@@ -435,7 +432,7 @@ class TestCmdReviewPrepare:
                 )
 
         assert "different review batch" in str(exc.value)
-        assert "expected import file" in str(exc.value)
+        assert "expected packet_sha256" in str(exc.value)
 
     def test_trusted_internal_import_clears_provisional_flags(self, empty_state, tmp_path):
         from unittest.mock import MagicMock
@@ -1982,7 +1979,7 @@ class TestCmdReviewPrepare:
         ]
 
         with patch(
-            "desloppify.app.commands.review.runner_process.codex_batch_command",
+            "desloppify.app.commands.runner.codex_batch.codex_batch_command",
             return_value=command,
         ):
             code = runner_helpers_mod.run_codex_batch(
@@ -2024,7 +2021,7 @@ class TestCmdReviewPrepare:
         ]
 
         with patch(
-            "desloppify.app.commands.review.runner_process.codex_batch_command",
+            "desloppify.app.commands.runner.codex_batch.codex_batch_command",
             return_value=command,
         ):
             code = runner_helpers_mod.run_codex_batch(
