@@ -111,46 +111,26 @@ def _validate_dimension_judgment(
         log_fn(f"  dimension_judgment.{key}: expected object, skipping")
         return None
 
-    strengths_raw = raw.get("strengths")
-    if not isinstance(strengths_raw, list):
-        if require_complete:
-            raise ValueError(
-                f"dimension_judgment.{key}.strengths must be an array"
-            )
-        strengths: list[str] = []
-    else:
-        strengths = [
-            str(s).strip()
-            for s in strengths_raw[:5]
-            if isinstance(s, str) and str(s).strip()
-        ]
-
-    issue_character = ""
-    ic_raw = raw.get("issue_character")
-    if isinstance(ic_raw, str) and ic_raw.strip():
-        issue_character = ic_raw.strip()
-    else:
-        if require_complete:
-            raise ValueError(
-                f"dimension_judgment.{key}.issue_character must be a non-empty string"
-            )
-        log_fn(f"  dimension_judgment.{key}.issue_character: missing or empty")
-
-    score_rationale = ""
-    sr_raw = raw.get("score_rationale")
-    if isinstance(sr_raw, str) and sr_raw.strip():
-        score_rationale = sr_raw.strip()
-        if len(score_rationale) < 50:
-            log_fn(
-                f"  dimension_judgment.{key}.score_rationale: "
-                f"too short ({len(score_rationale)} chars, want ≥50)"
-            )
-    else:
-        if require_complete:
-            raise ValueError(
-                f"dimension_judgment.{key}.score_rationale must be a non-empty string"
-            )
-        log_fn(f"  dimension_judgment.{key}.score_rationale: missing or empty")
+    strengths = _normalize_dimension_judgment_strengths(
+        key,
+        raw.get("strengths"),
+        require_complete=require_complete,
+    )
+    issue_character = _normalize_dimension_judgment_text(
+        key,
+        raw.get("issue_character"),
+        field_name="issue_character",
+        require_complete=require_complete,
+        log_fn=log_fn,
+    )
+    score_rationale = _normalize_dimension_judgment_text(
+        key,
+        raw.get("score_rationale"),
+        field_name="score_rationale",
+        require_complete=require_complete,
+        log_fn=log_fn,
+        min_length=50,
+    )
 
     if not issue_character and not score_rationale and not strengths:
         return None
@@ -163,6 +143,104 @@ def _validate_dimension_judgment(
     if score_rationale:
         result["score_rationale"] = score_rationale
     return result
+
+
+def _normalize_dimension_judgment_strengths(
+    key: str,
+    strengths_raw: object,
+    *,
+    require_complete: bool,
+) -> list[str]:
+    """Normalize the optional strengths list for one dimension judgment."""
+    if isinstance(strengths_raw, list):
+        return [
+            str(item).strip()
+            for item in strengths_raw[:5]
+            if isinstance(item, str) and str(item).strip()
+        ]
+    if require_complete:
+        raise ValueError(f"dimension_judgment.{key}.strengths must be an array")
+    return []
+
+
+def _normalize_dimension_judgment_text(
+    key: str,
+    raw_value: object,
+    *,
+    field_name: str,
+    require_complete: bool,
+    log_fn,
+    min_length: int | None = None,
+) -> str:
+    """Normalize one textual dimension-judgment field."""
+    value = raw_value.strip() if isinstance(raw_value, str) else ""
+    if not value:
+        if require_complete:
+            raise ValueError(
+                f"dimension_judgment.{key}.{field_name} must be a non-empty string"
+            )
+        log_fn(f"  dimension_judgment.{key}.{field_name}: missing or empty")
+        return ""
+    if min_length is not None and len(value) < min_length:
+        log_fn(
+            f"  dimension_judgment.{key}.{field_name}: "
+            f"too short ({len(value)} chars, want ≥{min_length})"
+        )
+    return value
+
+
+def _resolve_issue_scope(
+    item: object,
+    note: BatchDimensionNotePayload,
+    *,
+    field_name: str,
+) -> str:
+    """Resolve issue scope fields from the issue payload or dimension defaults."""
+    raw_item = item if isinstance(item, dict) else {}
+    return str(raw_item.get(field_name, note.get(field_name, ""))).strip()
+
+
+def _build_normalized_issue(
+    *,
+    issue: ReviewIssuePayload,
+    item: object,
+    note: BatchDimensionNotePayload,
+    idx: int,
+) -> NormalizedBatchIssue:
+    """Build one normalized issue payload or raise on missing scope defaults."""
+    impact_scope = _resolve_issue_scope(item, note, field_name="impact_scope")
+    fix_scope = _resolve_issue_scope(item, note, field_name="fix_scope")
+    if not impact_scope or not fix_scope:
+        raise ValueError(
+            f"issues[{idx}] requires impact_scope and fix_scope "
+            "(or dimension_notes defaults)"
+        )
+    return NormalizedBatchIssue(
+        dimension=issue["dimension"],
+        identifier=issue["identifier"],
+        summary=issue["summary"],
+        confidence=issue["confidence"],
+        suggestion=issue["suggestion"],
+        related_files=list(issue.get("related_files", [])),
+        evidence=list(issue.get("evidence", [])),
+        impact_scope=impact_scope,
+        fix_scope=fix_scope,
+        reasoning=str(issue.get("reasoning", "")),
+        evidence_lines=list(issue.get("evidence_lines", []))
+        if isinstance(issue.get("evidence_lines"), list)
+        else None,
+    )
+
+
+def _raise_issue_schema_errors(errors: list[str]) -> None:
+    """Raise a capped issue-schema validation error list."""
+    if not errors:
+        return
+    visible = errors[:10]
+    remaining = len(errors) - len(visible)
+    if remaining > 0:
+        visible.append(f"... {remaining} additional issue schema error(s) omitted")
+    raise ValueError("; ".join(visible))
 
 
 def _normalize_issues(
@@ -197,45 +275,18 @@ def _normalize_issues(
 
         dim = issue["dimension"]
         note = dimension_notes.get(dim, {})
-        impact_scope = str(
-            (item if isinstance(item, dict) else {}).get(
-                "impact_scope", note.get("impact_scope", "")
+        try:
+            issues.append(
+                _build_normalized_issue(
+                    issue=issue,
+                    item=item,
+                    note=note,
+                    idx=idx,
+                )
             )
-        ).strip()
-        fix_scope = str(
-            (item if isinstance(item, dict) else {}).get(
-                "fix_scope", note.get("fix_scope", "")
-            )
-        ).strip()
-        if not impact_scope or not fix_scope:
-            errors.append(
-                f"issues[{idx}] requires impact_scope and fix_scope "
-                "(or dimension_notes defaults)"
-            )
-            continue
-        issues.append(
-            NormalizedBatchIssue(
-                dimension=issue["dimension"],
-                identifier=issue["identifier"],
-                summary=issue["summary"],
-                confidence=issue["confidence"],
-                suggestion=issue["suggestion"],
-                related_files=list(issue.get("related_files", [])),
-                evidence=list(issue.get("evidence", [])),
-                impact_scope=impact_scope,
-                fix_scope=fix_scope,
-                reasoning=str(issue.get("reasoning", "")),
-                evidence_lines=list(issue.get("evidence_lines", []))
-                if isinstance(issue.get("evidence_lines"), list)
-                else None,
-            )
-        )
-    if errors:
-        visible = errors[:10]
-        remaining = len(errors) - len(visible)
-        if remaining > 0:
-            visible.append(f"... {remaining} additional issue schema error(s) omitted")
-        raise ValueError("; ".join(visible))
+        except ValueError as exc:
+            errors.append(str(exc))
+    _raise_issue_schema_errors(errors)
     if len(issues) <= max_batch_issues:
         return issues
 
@@ -319,6 +370,80 @@ def _compute_batch_quality(
     }
 
 
+def _normalize_assessments_and_notes(
+    *,
+    raw_assessments: dict[object, object],
+    raw_dimension_notes: dict[object, object],
+    allowed_dims: set[str],
+    abstraction_sub_axes: tuple[str, ...],
+) -> tuple[dict[str, float], dict[str, BatchDimensionNotePayload], float]:
+    """Normalize assessment scores and their required dimension notes."""
+    assessments: dict[str, float] = {}
+    dimension_notes: dict[str, BatchDimensionNotePayload] = {}
+    high_score_missing_issue_note = 0.0
+    for key, value in raw_assessments.items():
+        if not isinstance(key, str) or not key or key not in allowed_dims:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        score = round(max(0.0, min(100.0, float(value))), 1)
+        note_raw = raw_dimension_notes.get(key)
+        evidence, impact_scope, fix_scope, confidence, issues_note = (
+            _validate_dimension_note(key, note_raw)
+        )
+        if not isinstance(note_raw, dict):
+            raise ValueError(
+                f"dimension_notes missing object for assessed dimension: {key}"
+            )
+        if score > HIGH_SCORE_ISSUES_NOTE_THRESHOLD and not issues_note:
+            high_score_missing_issue_note += 1
+
+        note_payload: BatchDimensionNotePayload = {
+            "evidence": [str(item).strip() for item in evidence if str(item).strip()],
+            "impact_scope": impact_scope.strip(),
+            "fix_scope": fix_scope.strip(),
+            "confidence": confidence,
+            "issues_preventing_higher_score": issues_note,
+        }
+        if key == "abstraction_fitness":
+            normalized_sub_axes = _normalize_abstraction_sub_axes(
+                note_raw, abstraction_sub_axes
+            )
+            if normalized_sub_axes:
+                note_payload["sub_axes"] = normalized_sub_axes
+
+        assessments[key] = score
+        dimension_notes[key] = note_payload
+    return assessments, dimension_notes, high_score_missing_issue_note
+
+
+def _normalize_dimension_judgments(
+    *,
+    assessments: dict[str, float],
+    raw_judgment: dict[object, object],
+    log_fn,
+) -> dict[str, BatchDimensionJudgmentPayload]:
+    """Normalize required dimension_judgment entries for assessed dimensions."""
+    dimension_judgment: dict[str, BatchDimensionJudgmentPayload] = {}
+    for key in assessments:
+        if key not in raw_judgment:
+            raise ValueError(
+                f"dimension_judgment missing entry for assessed dimension: {key}"
+            )
+        validated = _validate_dimension_judgment(
+            key,
+            raw_judgment.get(key),
+            require_complete=True,
+            log_fn=log_fn,
+        )
+        if validated is None:
+            raise ValueError(
+                f"dimension_judgment.{key} must include strengths, issue_character, and score_rationale"
+            )
+        dimension_judgment[key] = validated
+    return dimension_judgment
+
+
 def normalize_batch_result(
     payload: dict[str, object],
     allowed_dims: set[str],
@@ -351,69 +476,23 @@ def normalize_batch_result(
     if not isinstance(raw_dimension_notes, dict):
         raise ValueError("dimension_notes must be an object")
 
-    assessments: dict[str, float] = {}
-    dimension_notes: dict[str, BatchDimensionNotePayload] = {}
-    high_score_missing_issue_note = 0.0
-    for key, value in raw_assessments.items():
-        if not isinstance(key, str) or not key:
-            continue
-        if key not in allowed_dims:
-            continue
-        if isinstance(value, bool):
-            continue
-        if not isinstance(value, int | float):
-            continue
-        score = round(max(0.0, min(100.0, float(value))), 1)
-
-        note_raw = raw_dimension_notes.get(key)
-        evidence, impact_scope, fix_scope, confidence, issues_note = (
-            _validate_dimension_note(key, note_raw)
+    assessments, dimension_notes, high_score_missing_issue_note = (
+        _normalize_assessments_and_notes(
+            raw_assessments=raw_assessments,
+            raw_dimension_notes=raw_dimension_notes,
+            allowed_dims=allowed_dims,
+            abstraction_sub_axes=abstraction_sub_axes,
         )
-        if not isinstance(note_raw, dict):
-            raise ValueError(
-                f"dimension_notes missing object for assessed dimension: {key}"
-            )
-        if score > HIGH_SCORE_ISSUES_NOTE_THRESHOLD and not issues_note:
-            high_score_missing_issue_note += 1
-
-        normalized_sub_axes: dict[str, float] = {}
-        if key == "abstraction_fitness":
-            normalized_sub_axes = _normalize_abstraction_sub_axes(
-                note_raw, abstraction_sub_axes
-            )
-
-        assessments[key] = score
-        dimension_notes[key] = {
-            "evidence": [str(item).strip() for item in evidence if str(item).strip()],
-            "impact_scope": impact_scope.strip(),
-            "fix_scope": fix_scope.strip(),
-            "confidence": confidence,
-            "issues_preventing_higher_score": issues_note,
-        }
-        if normalized_sub_axes:
-            dimension_notes[key]["sub_axes"] = normalized_sub_axes
+    )
 
     raw_judgment = payload.get("dimension_judgment", {})
     if not isinstance(raw_judgment, dict):
         raise ValueError("dimension_judgment must be an object")
-    dimension_judgment: dict[str, BatchDimensionJudgmentPayload] = {}
-    for key in assessments:
-        if key not in raw_judgment:
-            raise ValueError(
-                f"dimension_judgment missing entry for assessed dimension: {key}"
-            )
-        judgment_raw = raw_judgment.get(key)
-        validated = _validate_dimension_judgment(
-            key,
-            judgment_raw,
-            require_complete=True,
-            log_fn=log_fn,
-        )
-        if validated is None:
-            raise ValueError(
-                f"dimension_judgment.{key} must include strengths, issue_character, and score_rationale"
-            )
-        dimension_judgment[key] = validated
+    dimension_judgment = _normalize_dimension_judgments(
+        assessments=assessments,
+        raw_judgment=raw_judgment,
+        log_fn=log_fn,
+    )
 
     issues = _normalize_issues(
         payload.get("issues"),
