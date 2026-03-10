@@ -38,6 +38,140 @@ from .helpers import (
 from .services import TriageServices, default_triage_services
 
 
+def _require_completion_stage_path(
+    *,
+    plan: dict,
+    meta: dict,
+    stages: dict,
+    attestation: str | None,
+    save_plan_fn,
+) -> bool:
+    """Require and auto-confirm the organize/enrich/sense-check completion path."""
+    stage_checks = (
+        (
+            _require_organize_stage_for_complete,
+            lambda: _auto_confirm_stage_for_complete(
+                plan=plan,
+                stages=stages,
+                stage="organize",
+                attestation=attestation,
+                save_plan_fn=save_plan_fn,
+            ),
+        ),
+        (
+            _require_enrich_stage_for_complete,
+            lambda: _auto_confirm_enrich_for_complete(
+                plan=plan,
+                stages=stages,
+                attestation=attestation,
+                save_plan_fn=save_plan_fn,
+            ),
+        ),
+        (
+            _require_sense_check_stage_for_complete,
+            lambda: _auto_confirm_stage_for_complete(
+                plan=plan,
+                stages=stages,
+                stage="sense-check",
+                attestation=attestation,
+                save_plan_fn=save_plan_fn,
+            ),
+        ),
+    )
+    for require_fn, confirm_fn in stage_checks:
+        if not require_fn(plan=plan, meta=meta, stages=stages):
+            return False
+        if not confirm_fn():
+            return False
+    return True
+
+
+def _print_completion_coverage_warning(*, organized: int, total: int) -> None:
+    """Print warnings for incomplete cluster coverage at completion time."""
+    if total <= 0:
+        return
+    if organized == 0:
+        print(colorize("  Cannot complete: no issues have been organized into clusters.", "red"))
+        print(colorize(f"  {total} issues are waiting.", "dim"))
+        return
+    if organized < total:
+        remaining = total - organized
+        print(
+            colorize(
+                f"  Warning: {remaining}/{total} issues are not yet in any cluster.",
+                "yellow",
+            )
+        )
+
+
+def _print_completion_jump_back_guidance() -> None:
+    """Print the post-summary guidance for revisiting earlier triage stages."""
+    print()
+    print(
+        colorize(
+            "  To revise an earlier stage: desloppify plan triage --stage <observe|reflect|organize|enrich|sense-check>",
+            "dim",
+        )
+    )
+    print(colorize("  Pass --report to update, or omit to keep existing analysis.", "dim"))
+
+
+def _resolve_confirm_existing_context(
+    *,
+    args: argparse.Namespace,
+    plan: dict,
+    services: TriageServices,
+    stages: dict,
+) -> tuple[object, bool] | None:
+    """Load confirm-existing triage context and validate the stage prerequisites."""
+    runtime = services.command_runtime(args)
+    state = runtime.state
+    si = services.collect_triage_input(plan, state)
+    has_only_additions = bool(si.new_since_last) and not si.resolved_since_last
+    if not _confirm_existing_stages_valid(
+        stages=stages,
+        has_only_additions=has_only_additions,
+        si=si,
+    ):
+        return None
+    return si, has_only_additions
+
+
+def _resolve_confirm_existing_inputs(
+    *,
+    note: str | None,
+    strategy: str | None,
+    confirmed: str | None,
+    plan: dict,
+    state: dict,
+    meta: dict,
+    si,
+    has_only_additions: bool,
+) -> tuple[str, str, str] | None:
+    """Validate and resolve note/strategy/confirmed inputs for confirm-existing."""
+    if not _confirm_note_valid(note):
+        return None
+    resolved_strategy = _resolve_confirm_existing_strategy(
+        strategy,
+        has_only_additions=has_only_additions,
+        meta=meta,
+    )
+    if resolved_strategy is None:
+        return None
+    if not _confirm_strategy_valid(resolved_strategy):
+        return None
+    confirmed_text = _confirmed_text_or_error(
+        plan=plan,
+        state=state,
+        confirmed=confirmed,
+    )
+    if confirmed_text is None:
+        return None
+    if not _note_cites_new_issues_or_error(note, si):
+        return None
+    return note or "", resolved_strategy, confirmed_text
+
+
 def _cmd_triage_complete(
     args: argparse.Namespace,
     *,
@@ -59,80 +193,23 @@ def _cmd_triage_complete(
     state = resolved_services.command_runtime(args).state
     review_ids = open_review_ids_from_state(state)
 
-    # Require organize stage confirmed
-    if not _require_organize_stage_for_complete(
+    if not _require_completion_stage_path(
         plan=plan,
         meta=meta,
-        stages=stages,
-    ):
-        return
-
-    # Fold-confirm: auto-confirm organize if attestation provided
-    if not _auto_confirm_stage_for_complete(
-        plan=plan,
-        stages=stages,
-        stage="organize",
-        attestation=attestation,
-        save_plan_fn=resolved_services.save_plan,
-    ):
-        return
-
-    # Require enrich stage confirmed
-    if not _require_enrich_stage_for_complete(
-        plan=plan,
-        meta=meta,
-        stages=stages,
-    ):
-        return
-
-    # Fold-confirm: auto-confirm enrich if attestation provided
-    if not _auto_confirm_enrich_for_complete(
-        plan=plan,
         stages=stages,
         attestation=attestation,
         save_plan_fn=resolved_services.save_plan,
     ):
         return
 
-    # Require sense-check stage confirmed
-    if not _require_sense_check_stage_for_complete(
-        plan=plan,
-        meta=meta,
-        stages=stages,
-    ):
-        return
-
-    # Fold-confirm: auto-confirm sense-check if attestation provided
-    if not _auto_confirm_stage_for_complete(
-        plan=plan,
-        stages=stages,
-        stage="sense-check",
-        attestation=attestation,
-        save_plan_fn=resolved_services.save_plan,
-    ):
-        return
-
-    # Re-validate cluster enrichment at completion time (prevents bypassing
-    # organize gate by editing plan.json directly)
     if not _completion_clusters_valid(plan, state):
         return
 
-    # Verify cluster coverage
     organized, total, _clusters = triage_coverage(plan, open_review_ids=review_ids)
-
     if total > 0 and organized == 0:
-        print(colorize("  Cannot complete: no issues have been organized into clusters.", "red"))
-        print(colorize(f"  {total} issues are waiting.", "dim"))
+        _print_completion_coverage_warning(organized=organized, total=total)
         return
-
-    if total > 0 and organized < total:
-        remaining = total - organized
-        print(
-            colorize(
-                f"  Warning: {remaining}/{total} issues are not yet in any cluster.",
-                "yellow",
-            )
-        )
+    _print_completion_coverage_warning(organized=organized, total=total)
 
     strategy = _resolve_completion_strategy(strategy, meta=meta)
     if strategy is None:
@@ -145,15 +222,7 @@ def _cmd_triage_complete(
 
     organized, total, _ = triage_coverage(plan, open_review_ids=review_ids)
 
-    # Jump-back guidance before committing
-    print()
-    print(
-        colorize(
-            "  To revise an earlier stage: desloppify plan triage --stage <observe|reflect|organize|enrich|sense-check>",
-            "dim",
-        )
-    )
-    print(colorize("  Pass --report to update, or omit to keep existing analysis.", "dim"))
+    _print_completion_jump_back_guidance()
 
     resolved_services.append_log_entry(
         plan,
@@ -197,61 +266,42 @@ def _cmd_confirm_existing(
     if not _require_prior_strategy_for_confirm(meta):
         return
 
-    # Determine if this is a light-path (additions only) or full ceremony
-    runtime = resolved_services.command_runtime(args)
-    state = runtime.state
-    si = resolved_services.collect_triage_input(plan, state)
-    has_only_additions = bool(si.new_since_last) and not si.resolved_since_last
-
-    if not _confirm_existing_stages_valid(
+    context = _resolve_confirm_existing_context(
+        args=args,
+        plan=plan,
+        services=resolved_services,
         stages=stages,
-        has_only_additions=has_only_additions,
-        si=si,
-    ):
+    )
+    if context is None:
         return
+    si, has_only_additions = context
+    state = resolved_services.command_runtime(args).state
 
-    # Require existing enriched clusters
     clusters_with_issues = manual_clusters_with_issues(plan)
     if not clusters_with_issues:
         print(colorize("  Cannot confirm existing: no clusters with issues exist.", "red"))
         print(colorize("  Use the full organize flow instead.", "dim"))
         return
 
-    # Require note
-    if not _confirm_note_valid(note):
-        return
-
-    # Require strategy (default to "same" on light path)
-    strategy = _resolve_confirm_existing_strategy(
-        strategy,
-        has_only_additions=has_only_additions,
-        meta=meta,
-    )
-    if strategy is None:
-        return
-
-    # Strategy length check (unless "same")
-    if not _confirm_strategy_valid(strategy):
-        return
-
-    # Require --confirmed with plan review
-    confirmed_text = _confirmed_text_or_error(
+    resolved_inputs = _resolve_confirm_existing_inputs(
+        note=note,
+        strategy=strategy,
+        confirmed=confirmed,
         plan=plan,
         state=state,
-        confirmed=confirmed,
+        meta=meta,
+        si=si,
+        has_only_additions=has_only_additions,
     )
-    if confirmed_text is None:
+    if resolved_inputs is None:
         return
-
-    # Validate: note cites at least 1 new/changed issue (if there are any)
-    if not _note_cites_new_issues_or_error(note, si):
-        return
+    note_text, strategy, confirmed_text = resolved_inputs
 
     # Record organize as confirmed-existing and complete
     stages = meta.setdefault("triage_stages", {})
     record_confirm_existing_completion(
         stages=stages,
-        note=note,
+        note=note_text,
         issue_count=len(clusters_with_issues),
         confirmed_text=confirmed_text,
     )
@@ -269,7 +319,7 @@ def _cmd_confirm_existing(
         strategy,
         services=resolved_services,
         completion_mode="confirm_existing",
-        completion_note=note or "",
+        completion_note=note_text,
     )
     print(
         colorize(
