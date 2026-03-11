@@ -79,6 +79,8 @@ def _emit_requested_output(
     opts: NextOptions,
     payload: dict,
     items: list[dict],
+    *,
+    command_name: str = "next",
 ) -> bool:
     if opts.output_file:
         if next_output_mod.write_output_file(
@@ -87,11 +89,17 @@ def _emit_requested_output(
             len(items),
             safe_write_text_fn=safe_write_text,
             colorize_fn=colorize,
+            label=f"{command_name} output",
         ):
             return True
         raise CommandError("Failed to write output file")
 
-    return next_output_mod.emit_non_terminal_output(opts.output_format, payload, items)
+    return next_output_mod.emit_non_terminal_output(
+        opts.output_format,
+        payload,
+        items,
+        command=command_name,
+    )
 
 
 def _write_next_payload(
@@ -336,7 +344,7 @@ def _build_and_render_queue_view(
         command_name=view.command_name,
     )
 
-    if _emit_requested_output(opts, payload, items):
+    if _emit_requested_output(opts, payload, items, command_name=view.command_name):
         return
 
     _render_terminal_queue_view(

@@ -168,8 +168,20 @@ def build_query_payload(
 
 def render_markdown(items: Sequence[Mapping[str, Any]]) -> str:
     """Render queue items as markdown."""
+    return render_markdown_for_command(items, command="next")
+
+
+def render_markdown_for_command(
+    items: Sequence[Mapping[str, Any]],
+    *,
+    command: str,
+) -> str:
+    """Render queue items as markdown for the given queue surface."""
+    heading = "# Desloppify Execution Queue"
+    if command == "backlog":
+        heading = "# Desloppify Backlog"
     lines = [
-        "# Desloppify Next Queue",
+        heading,
         "",
         "| Kind | Confidence | Summary | Command |",
         "|------|------------|---------|---------|",
@@ -191,6 +203,7 @@ def write_output_file(
     *,
     safe_write_text_fn,
     colorize_fn,
+    label: str = "queue output",
 ) -> bool:
     """Persist payload to file and print success/failure hints."""
     try:
@@ -198,7 +211,7 @@ def write_output_file(
         print(colorize_fn(f"Wrote {item_count} items to {output_file}", "green"))
     except OSError as exc:
         payload["output_error"] = str(exc)
-        print_write_error(output_file, exc, label="next output")
+        print_write_error(output_file, exc, label=label)
         return False
     return True
 
@@ -207,11 +220,13 @@ def emit_non_terminal_output(
     output_format: str,
     payload: dict[str, Any],
     items: Sequence[Mapping[str, Any]],
+    *,
+    command: str = "next",
 ) -> bool:
     """Render JSON/markdown output variants."""
     renderers = {
         "json": lambda: print(json.dumps(payload, indent=2)),
-        "md": lambda: print(render_markdown(items)),
+        "md": lambda: print(render_markdown_for_command(items, command=command)),
     }
     renderer = renderers.get(output_format)
     if renderer is None:
@@ -224,6 +239,7 @@ __all__ = [
     "build_query_payload",
     "emit_non_terminal_output",
     "render_markdown",
+    "render_markdown_for_command",
     "serialize_item",
     "write_output_file",
 ]
