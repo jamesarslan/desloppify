@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from desloppify.languages._framework.generic_support.core import (
 )
 from desloppify.languages._framework.generic_parts.parsers import ToolParserError
 from desloppify.languages._framework.generic_parts.tool_runner import (
+    resolve_command_argv,
     run_tool_result,
 )
 from desloppify.languages._framework.generic_parts.tool_spec import (
@@ -357,6 +359,28 @@ class TestMakeToolPhase:
         )
         assert failed_result.status == "error"
         assert failed_result.error_kind == "parser_error"
+
+    def test_resolve_command_argv_plain_command_does_not_shell_fallback(self):
+        argv = resolve_command_argv("nonexistent_tool_xyz_123 --version")
+        assert argv == ["nonexistent_tool_xyz_123", "--version"]
+
+    def test_resolve_command_argv_shell_meta_uses_platform_shell(self):
+        argv = resolve_command_argv("echo ok | cat")
+        if os.name == "nt":
+            assert argv == ["cmd.exe", "/d", "/s", "/c", "echo ok | cat"]
+        else:
+            assert argv == ["/bin/sh", "-lc", "echo ok | cat"]
+
+
+    def test_resolve_command_argv_windows_backslash_path_preserved(self):
+        with patch("desloppify.languages._framework.generic_parts.tool_runner.os.name", "nt"):
+            argv = resolve_command_argv(r"C:\Tools\tool.exe --flag")
+        assert argv == [r"C:\Tools\tool.exe", "--flag"]
+
+    def test_resolve_command_argv_windows_quoted_path_unquotes_executable(self):
+        with patch("desloppify.languages._framework.generic_parts.tool_runner.os.name", "nt"):
+            argv = resolve_command_argv('"C:\\Program Files\\Tool\\tool.exe" --flag')
+        assert argv == [r"C:\Program Files\Tool\tool.exe", "--flag"]
 
 
 class TestToolSpecNormalization:

@@ -11,10 +11,13 @@ These have custom detectors, language-specific smell analysis, subjective review
 | **Python** | `python/` | AST smell detection, ruff/bandit adapters, import-linter, unused detection, security, auto-fix |
 | **TypeScript** | `typescript/` | React-aware detectors, knip adapter, 7 auto-fixers, props/exports/concerns analysis |
 | **C#/.NET** | `csharp/` | Structural + coupling + security, dotnet-based dep analysis |
+| **C/C++** | `cxx/` | `compile_commands.json` primary dep analysis, `Makefile` best-effort fallback, cppcheck/clang-tidy surfaces, tree-sitter structural signals |
 | **Dart** | `dart/` | Flutter-aware, pubspec integration, test coverage mapping |
 | **GDScript** | `gdscript/` | Godot scene-aware, tree-sitter phases, shared framework helpers |
 | **Go** | `go/` | golangci-lint + go vet adapters, regex function extraction, test coverage mapping |
 | **Rust** | `rust/` | Clippy/rustdoc best-practice phases, module-aware dep graph, inline + integration test coverage |
+
+For C/C++ setup requirements for a full tool-backed scan, see `cxx/README.md`.
 
 Example: `python/` — see `python/__init__.py` for the full plugin registration flow (`register_full_plugin(...)`) with 15+ detector phases, custom extractors, security hooks, and review guidance.
 
@@ -33,7 +36,6 @@ These are single-file plugins (~20-40 lines) that call `generic_lang()` with ext
 | Elixir | `elixir/` | credo | functions, imports |
 | Haskell | `haskell/` | hlint | functions, imports |
 | JavaScript | `javascript/` | eslint | functions, methods, classes, imports |
-| C/C++ | `cxx/` | cppcheck | functions, classes, includes |
 | Bash | `bash/` | shellcheck | functions, source imports |
 | Lua | `lua/` | luacheck | functions, imports |
 | Perl | `perl/` | perlcritic | subroutines, imports |
