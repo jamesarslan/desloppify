@@ -122,6 +122,29 @@ def resolve_issues(
     now = utc_now()
     resolved: list[str] = []
     resolved_issues: list[dict] = []
+
+    def _refresh_original_wontfix(issue: dict) -> None:
+        if status != "fixed" or issue.get("detector") != "stale_wontfix":
+            return
+        detail = issue.get("detail", {})
+        if not isinstance(detail, dict):
+            return
+        original_issue_id = detail.get("original_issue_id")
+        if not isinstance(original_issue_id, str) or not original_issue_id:
+            return
+        original = state["issues"].get(original_issue_id)
+        if not isinstance(original, dict) or original.get("status") != "wontfix":
+            return
+        snapshot_scan_count = int(state.get("scan_count", 0) or 0)
+        original["wontfix_scan_count"] = snapshot_scan_count
+        original["wontfix_snapshot"] = {
+            "captured_at": now,
+            "scan_count": snapshot_scan_count,
+            "tier": original.get("tier"),
+            "confidence": original.get("confidence"),
+            "detail": copy.deepcopy(original.get("detail", {})),
+        }
+
     status_filter = "all" if status == "open" else "open"
     for issue in match_issues(state, pattern, status_filter=status_filter):
         previous_status = str(issue.get("status", "open")).strip() or "open"
@@ -172,6 +195,7 @@ def resolve_issues(
         }
         updates.update(extra_updates)
         issue.update(updates)
+        _refresh_original_wontfix(issue)
         resolved.append(issue["id"])
         resolved_issues.append(issue)
 

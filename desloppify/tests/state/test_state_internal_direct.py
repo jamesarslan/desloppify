@@ -343,6 +343,54 @@ def test_resolve_wontfix_captures_snapshot_metadata():
     assert resolved["wontfix_snapshot"]["detail"]["complexity_score"] == 42
 
 
+def test_resolve_stale_wontfix_refreshes_original_wontfix_snapshot():
+    state = schema_mod.empty_state()
+    state["scan_count"] = 24
+    original = filtering_mod.make_issue(
+        "smells",
+        "pkg/a.py",
+        "monster_function",
+        tier=3,
+        confidence="medium",
+        summary="large function",
+        detail={"loc": 240, "complexity_score": 51},
+    )
+    original["status"] = "wontfix"
+    original["wontfix_scan_count"] = 1
+    original["wontfix_snapshot"] = {
+        "scan_count": 1,
+        "detail": {"loc": 180, "complexity_score": 40},
+    }
+    stale = filtering_mod.make_issue(
+        "stale_wontfix",
+        "pkg/a.py",
+        original["id"],
+        tier=3,
+        confidence="medium",
+        summary="stale wontfix",
+        detail={"original_issue_id": original["id"], "reasons": ["scan_decay"]},
+    )
+    state["issues"] = {
+        original["id"]: original,
+        stale["id"]: stale,
+    }
+
+    resolution_mod.resolve_issues(
+        state,
+        stale["id"],
+        status="fixed",
+        note="re-reviewed",
+        attestation="I have actually re-reviewed this wontfix and I am not gaming the score.",
+    )
+
+    refreshed = state["issues"][original["id"]]
+    assert refreshed["status"] == "wontfix"
+    assert refreshed["wontfix_scan_count"] == 24
+    assert refreshed["wontfix_snapshot"]["scan_count"] == 24
+    assert refreshed["wontfix_snapshot"]["detail"]["loc"] == 240
+    assert refreshed["wontfix_snapshot"]["detail"]["complexity_score"] == 51
+
+
 def test_resolve_open_reopens_non_open_issue_and_increments_reopen_count():
     state = schema_mod.empty_state()
     issue = filtering_mod.make_issue(
