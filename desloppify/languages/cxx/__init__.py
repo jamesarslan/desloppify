@@ -20,7 +20,7 @@ from desloppify.languages.cxx.extractors import (
     extract_all_cxx_functions,
     find_cxx_files,
 )
-from desloppify.languages.cxx.phases import phase_structural
+from desloppify.languages.cxx.phases import phase_coupling, phase_structural
 from desloppify.languages.cxx.review import (
     HOLISTIC_REVIEW_DIMENSIONS,
     LOW_VALUE_PATTERN,
@@ -47,6 +47,7 @@ class CxxConfig(LangConfig):
             barrel_names=set(),
             phases=[
                 DetectorPhase("Structural analysis", phase_structural),
+                DetectorPhase("Coupling + cycles + orphaned", phase_coupling),
                 detector_phase_signature(),
                 detector_phase_test_coverage(),
                 detector_phase_security(),
